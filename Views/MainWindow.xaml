@@ -1,0 +1,144 @@
+<Window x:Class="GsmAgent.Views.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="GSM Agent" Height="520" Width="420"
+    WindowStartupLocation="CenterScreen"
+    ResizeMode="CanResizeWithGrip"
+    Background="{StaticResource BgPrimaryBrush}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ========== HEADER (compact) ========== -->
+        <Border Grid.Row="0" Background="{StaticResource BgSecondaryBrush}" Padding="12,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="📡" FontSize="16" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock Text="GSM Agent" FontSize="15" FontWeight="Bold"
+                        Foreground="{StaticResource AccentBlueBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Connection indicator -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="8" Height="8" Margin="0,0,5,0"
+                        Fill="{Binding ServerStatusColor}"/>
+                    <TextBlock Text="{Binding ServerStatus}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ========== STATS BAR ========== -->
+        <Border Grid.Row="1" Background="{StaticResource BgCardBrush}" Padding="12,6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding OnlineSimCount}" FontSize="18" FontWeight="Bold"
+                        Foreground="{StaticResource AccentGreenBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="SIMs" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding TotalSentCount}" FontSize="18" FontWeight="Bold"
+                        Foreground="{StaticResource AccentBlueBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Sent" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding TotalQueueSize}" FontSize="18" FontWeight="Bold"
+                        Foreground="{StaticResource AccentYellowBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Queue" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="3" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding RateLimitedCount}" FontSize="18" FontWeight="Bold"
+                        Foreground="{StaticResource AccentRedBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Limited" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ========== MAIN: SIM List (compact) ========== -->
+        <Grid Grid.Row="2" Margin="8,8,8,4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Toolbar -->
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                <Button Content="🔍 Scan" Command="{Binding ScanCommand}"
+                    Padding="12,5" Background="{StaticResource AccentBlueBrush}" Foreground="White"
+                    FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                <Button Content="▶ Start" Command="{Binding StartWorkersCommand}"
+                    Padding="12,5" Background="{StaticResource AccentGreenBrush}" Foreground="White"
+                    FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                <Button Content="⏹ Stop" Command="{Binding StopWorkersCommand}"
+                    Padding="12,5" Background="{StaticResource AccentRedBrush}" Foreground="White"
+                    FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
+                <TextBlock Text="{Binding ScanStatus}" Foreground="{StaticResource TextSecondaryBrush}"
+                    VerticalAlignment="Center" FontSize="11"/>
+            </StackPanel>
+
+            <!-- SIM List -->
+            <DataGrid Grid.Row="1" ItemsSource="{Binding SimList}" AutoGenerateColumns="False"
+                IsReadOnly="True" Background="{StaticResource BgSecondaryBrush}"
+                Foreground="{StaticResource TextPrimaryBrush}" BorderThickness="0"
+                GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#2a2a4a"
+                RowBackground="{StaticResource BgSecondaryBrush}"
+                AlternatingRowBackground="#1a1a3e" HeadersVisibility="Column"
+                FontSize="11" RowHeight="26">
+                <DataGrid.ColumnHeaderStyle>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Background" Value="{StaticResource BgCardBrush}"/>
+                        <Setter Property="Foreground" Value="{StaticResource AccentBlueBrush}"/>
+                        <Setter Property="Padding" Value="6,4"/>
+                        <Setter Property="FontWeight" Value="Bold"/>
+                        <Setter Property="FontSize" Value="11"/>
+                    </Style>
+                </DataGrid.ColumnHeaderStyle>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="COM" Binding="{Binding ComPort}" Width="55"/>
+                    <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="60"/>
+                    <DataGridTextColumn Header="SĐT" Binding="{Binding PhoneNumber}" Width="105"/>
+                    <DataGridTextColumn Header="Signal" Binding="{Binding SignalDisplay}" Width="50"/>
+                    <DataGridTextColumn Header="Sent" Binding="{Binding TotalSent}" Width="45"/>
+                    <DataGridTextColumn Header="Fail" Binding="{Binding TotalFailed}" Width="40"/>
+                    <DataGridTextColumn Header="Q" Binding="{Binding QueueSize}" Width="30"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+
+        <!-- ========== STATUS BAR ========== -->
+        <Border Grid.Row="3" Background="{StaticResource BgSecondaryBrush}" Padding="10,5">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}"
+                    Foreground="{StaticResource TextSecondaryBrush}" FontSize="10"
+                    TextTrimming="CharacterEllipsis"/>
+                <TextBlock Grid.Column="1" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10">
+                    <Run Text="v1.0 | "/><Run Text="{Binding Settings.AgentId}"/>
+                </TextBlock>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
