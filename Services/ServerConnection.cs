@@ -132,7 +132,15 @@ public class ServerConnection : IDisposable
     {
         var sims = _portManager.Sims.Values
             .Where(s => s.Status == SimStatus.Online)
-            .Select(s => new { s.ComPort, s.PhoneNumber, s.Provider, s.SignalLevel })
+            .Select(s => new
+            {
+                s.ComPort,
+                s.PhoneNumber,
+                s.Provider,
+                s.SignalLevel,
+                s.Ccid,
+                DeviceName = _settings.AgentId, // hostname máy
+            })
             .ToList();
 
         _socket?.EmitAsync("agent:sims", JsonConvert.SerializeObject(sims));

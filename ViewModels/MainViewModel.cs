@@ -59,6 +59,9 @@ public partial class MainViewModel : ObservableObject
                 UpdateStats();
                 ScanStatus = $"✅ Scan xong: {sims.Count} SIM";
                 Logger.Info($"Scan hoàn tất: {sims.Count} SIM(s)");
+
+                // 🔥 Report SIM + Device info lên server → lưu DB
+                _serverConnection?.ReportSims();
             });
         };
 
