@@ -52,6 +52,11 @@ public class ModemWorker : IDisposable
         };
     }
 
+    private bool _urcSupported;
+    private int _lastSmsCount = -1;
+    private DateTime _lastSmsCountCheck = DateTime.MinValue;
+    private readonly HashSet<string> _processedSmsHashes = new();
+
     public bool Start()
     {
         if (!_helper.Open())
@@ -60,8 +65,17 @@ public class ModemWorker : IDisposable
             return false;
         }
 
-        // Enable URC for incoming SMS detection
-        _helper.EnableUrc();
+        // Test URC support → fallback to polling if not supported
+        _urcSupported = _helper.TestUrcSupport();
+        if (_urcSupported)
+        {
+            _helper.EnableUrc();
+            System.Diagnostics.Debug.WriteLine($"✅ [{_sim.ComPort}] URC supported — real-time SMS detection");
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ [{_sim.ComPort}] URC not supported — using Simulated URC (SMS count polling)");
+        }
 
         IsRunning = true;
         _sim.Status = SimStatus.Online;
@@ -90,8 +104,38 @@ public class ModemWorker : IDisposable
         {
             try
             {
-                // Check for incoming SMS (URC)
-                if (_helper.CheckForNewSms())
+                bool hasNewSms = false;
+
+                if (_urcSupported)
+                {
+                    // URC mode: check buffer for +CMTI/+CMT
+                    hasNewSms = _helper.CheckForNewSms();
+                }
+                else
+                {
+                    // Simulated URC: poll SMS count every 2s
+                    if ((DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= 2000)
+                    {
+                        _lastSmsCountCheck = DateTime.Now;
+                        var currentCount = _helper.GetSmsCount();
+                        if (currentCount >= 0)
+                        {
+                            if (_lastSmsCount == -1)
+                            {
+                                _lastSmsCount = currentCount; // Initialize
+                            }
+                            else if (currentCount > _lastSmsCount)
+                            {
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"📨 [{_sim.ComPort}] Simulated URC: {currentCount - _lastSmsCount} new SMS (count: {_lastSmsCount}→{currentCount})");
+                                hasNewSms = true;
+                            }
+                            _lastSmsCount = currentCount;
+                        }
+                    }
+                }
+
+                if (hasNewSms)
                 {
                     ReadIncomingSms();
                 }
@@ -237,12 +281,37 @@ public class ModemWorker : IDisposable
     {
         try
         {
-            var messages = _helper.ReadAllSms();
-            foreach (var (sender, content, time) in messages)
+            var messages = _helper.ReadAllSmsWithIndex();
+            foreach (var (index, sender, content, time) in messages)
             {
+                // Duplicate check: hash of sender+content+time
+                var hash = $"{sender}|{content}|{time:yyyyMMddHHmm}";
+                if (_processedSmsHashes.Contains(hash))
+                {
+                    // Already processed — just delete
+                    _helper.DeleteSms(index);
+                    continue;
+                }
+
+                _processedSmsHashes.Add(hash);
                 System.Diagnostics.Debug.WriteLine(
-                    $"📨 [{_sim.ComPort}] Incoming SMS from {sender}: {content}");
+                    $"📨 [{_sim.ComPort}] SMS from {sender}: {content}");
                 _onIncomingSms?.Invoke(_sim.ComPort, sender, content, time);
+
+                // Delete SMS after processing to free storage
+                _helper.DeleteSms(index);
+            }
+
+            // Update simulated URC count after deletion
+            if (messages.Count > 0)
+            {
+                _lastSmsCount = _helper.GetSmsCount();
+            }
+
+            // Cleanup old hashes (keep last 500)
+            if (_processedSmsHashes.Count > 500)
+            {
+                _processedSmsHashes.Clear();
             }
         }
         catch (Exception ex)

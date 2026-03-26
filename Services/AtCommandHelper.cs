@@ -353,31 +353,34 @@ public class AtCommandHelper : IDisposable
         }
     }
 
-    /// <summary>Đọc SMS từ modem.</summary>
-    public List<(string sender, string content, DateTime time)> ReadAllSms()
+    /// <summary>Đọc SMS từ modem — trả kèm index để xóa sau khi đọc.</summary>
+    public List<(int index, string sender, string content, DateTime time)> ReadAllSmsWithIndex()
     {
-        var messages = new List<(string, string, DateTime)>();
+        var messages = new List<(int, string, string, DateTime)>();
         try
         {
             SendAndRead("AT+CMGF=1", 500);
             SendAndRead("AT+CSCS=\"UCS2\"", 500);
-            var resp = SendAndRead("AT+CMGL=\"ALL\"", 5000);
+            var resp = SendAndRead("AT+CMGL=\"ALL\"", 10000);
 
-            // Parse +CMGL responses
+            // Parse +CMGL: index,status,"sender","name","timestamp"
             var lines = resp.Split('\n');
             for (int i = 0; i < lines.Length; i++)
             {
-                if (lines[i].Contains("+CMGL:") && i + 1 < lines.Length)
+                var headerMatch = Regex.Match(lines[i], @"\+CMGL:\s*(\d+),""[^""]*"",""([^""]*)"",""[^""]*"",""([^""]*)""");
+                if (headerMatch.Success && i + 1 < lines.Length)
                 {
-                    var headerMatch = Regex.Match(lines[i], @"""([^""]*)"",""([^""]*)"",""([^""]*)""");
-                    var content = lines[i + 1].Trim();
-
-                    string sender = headerMatch.Success ? DecodeUcs2IfNeeded(headerMatch.Groups[2].Value) : "Unknown";
+                    int index = int.Parse(headerMatch.Groups[1].Value);
+                    string sender = DecodeUcs2IfNeeded(headerMatch.Groups[2].Value);
+                    string timestamp = headerMatch.Groups[3].Value;
+                    string content = lines[i + 1].Trim();
                     string decodedContent = DecodeUcs2IfNeeded(content);
-                    var time = DateTime.Now; // Simplify — real parsing would extract from header
+
+                    // Parse timestamp: "26/03/26,10:30:00+36" → DateTime
+                    var time = ParseSmsTimestamp(timestamp);
 
                     if (!string.IsNullOrWhiteSpace(decodedContent))
-                        messages.Add((sender, decodedContent, time));
+                        messages.Add((index, sender, decodedContent, time));
                 }
             }
         }
@@ -388,11 +391,48 @@ public class AtCommandHelper : IDisposable
         return messages;
     }
 
+    /// <summary>Xóa 1 SMS theo index — gọi sau khi đã đọc xong.</summary>
+    public bool DeleteSms(int index)
+    {
+        try
+        {
+            var resp = SendAndRead($"AT+CMGD={index}", 2000);
+            return resp.Contains("OK");
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Xóa tất cả SMS đã đọc (flag=1) hoặc tất cả (flag=4).</summary>
+    public bool DeleteAllReadSms()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+CMGD=1,1", 3000); // flag 1 = delete read messages
+            return resp.Contains("OK");
+        }
+        catch { return false; }
+    }
+
     /// <summary>Bật URC notification cho SMS mới.</summary>
     public bool EnableUrc()
     {
         var resp = SendAndRead("AT+CNMI=2,1,0,0,0", 1000);
         return resp.Contains("OK");
+    }
+
+    /// <summary>Test xem modem có hỗ trợ URC không.</summary>
+    public bool TestUrcSupport()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+CNMI?", 1000);
+            if (resp.Contains("+CNMI:")) return true;
+
+            // Try enable
+            resp = SendAndRead("AT+CNMI=2,1,0,0,0", 1000);
+            return resp.Contains("OK");
+        }
+        catch { return false; }
     }
 
     /// <summary>Check URC buffer for +CMTI (new SMS).</summary>
@@ -405,6 +445,32 @@ public class AtCommandHelper : IDisposable
             return data.Contains("+CMTI:") || data.Contains("+CMT:");
         }
         catch { return false; }
+    }
+
+    /// <summary>Lấy số SMS hiện tại trong storage (Simulated URC).</summary>
+    public int GetSmsCount()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+CPMS?", 1000);
+            var match = Regex.Match(resp, @"\+CPMS:\s*""[^""]*"",(\d+),(\d+)");
+            if (match.Success)
+                return int.Parse(match.Groups[1].Value);
+        }
+        catch { }
+        return -1;
+    }
+
+    private static DateTime ParseSmsTimestamp(string ts)
+    {
+        try
+        {
+            // Format: "26/03/26,10:30:00+36" or "2026/03/26,10:30:00+36"
+            var parts = ts.Replace("\"", "").Split('+')[0].Split('-')[0];
+            if (DateTime.TryParse(parts, out var dt)) return dt;
+        }
+        catch { }
+        return DateTime.Now;
     }
 
     // ==================== Utilities ====================
