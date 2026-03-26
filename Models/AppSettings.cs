@@ -4,7 +4,7 @@ public class AppSettings
 {
     public string ServerUrl { get; set; } = "http://localhost:3000";
     public string AgentId { get; set; } = Environment.MachineName;
-    public int SmsCooldownMs { get; set; } = 2000;
+    public int SmsCooldownMs { get; set; } = 1000;
     public int MaxRetries { get; set; } = 3;
     public int MinSignalLevel { get; set; } = 8;
     public int DailyLimitPerSim { get; set; } = 150;

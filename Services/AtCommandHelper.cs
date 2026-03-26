@@ -117,12 +117,59 @@ public class AtCommandHelper : IDisposable
         return match.Success ? match.Value : null;
     }
 
-    /// <summary>Lấy số điện thoại từ CNUM.</summary>
+    /// <summary>Lấy số điện thoại từ CNUM — 3 retry, 5 regex patterns (ported from old Java).</summary>
     public string? GetCnum()
     {
-        var resp = SendAndRead("AT+CNUM", 1000);
-        var match = Regex.Match(resp, @"""(\+?\d{8,15})""");
-        return match.Success ? match.Groups[1].Value : null;
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                var resp = SendAndRead("AT+CNUM", 3000);
+                System.Diagnostics.Debug.WriteLine($"📱 CNUM response (attempt {attempt}): {resp.Replace("\r", " ").Replace("\n", " ")}");
+
+                if (string.IsNullOrWhiteSpace(resp) || resp.Trim() == "OK")
+                {
+                    Thread.Sleep(500);
+                    continue;
+                }
+
+                // Pattern 1: Standard format: +CNUM: "Name","+819012345678",145
+                var m = Regex.Match(resp, @"\+?CNUM:.*?""([^""]*)"",""(\+?\d{6,20})""");
+                if (m.Success) return m.Groups[2].Value;
+
+                // Pattern 2: Without name: +CNUM: ,"+819012345678",145
+                m = Regex.Match(resp, @"\+?CNUM:\s*,""(\+?\d{6,20})""");
+                if (m.Success) return m.Groups[1].Value;
+
+                // Pattern 3: Just number in quotes: +CNUM: "+819012345678"
+                m = Regex.Match(resp, @"\+?CNUM:.*?""(\+?\d{6,20})""");
+                if (m.Success) return m.Groups[1].Value;
+
+                // Pattern 4: Number without quotes: +CNUM: +819012345678
+                m = Regex.Match(resp, @"\+?CNUM:.*?(\+?\d{6,20})");
+                if (m.Success) return m.Groups[1].Value;
+
+                // Pattern 5: UCS2 encoded number (Japanese SIM may return hex)
+                m = Regex.Match(resp, @"\+?CNUM:.*?""([0-9A-Fa-f]{16,})""");
+                if (m.Success)
+                {
+                    var decoded = DecodeUcs2IfNeeded(m.Groups[1].Value);
+                    if (Regex.IsMatch(decoded, @"\d{6,}"))
+                        return decoded;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"⚠️ Could not parse CNUM (attempt {attempt}): {resp}");
+                Thread.Sleep(500);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"⚠️ CNUM failed (attempt {attempt}): {ex.Message}");
+                if (attempt < 3) Thread.Sleep(1000);
+            }
+        }
+
+        System.Diagnostics.Debug.WriteLine("❌ Failed to get phone number after 3 attempts");
+        return null;
     }
 
     /// <summary>Đọc số từ phonebook SIM (SM storage).</summary>
@@ -133,6 +180,52 @@ public class AtCommandHelper : IDisposable
         var match = Regex.Match(resp, @"""(\+?\d{8,15})""");
         return match.Success ? match.Groups[1].Value : null;
     }
+
+    /// <summary>Query nhà mạng bằng AT+COPS? (ported from old Java).</summary>
+    public string? QueryOperator()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+COPS?", 3000);
+
+            // Pattern 1: +COPS: 0,0,"Softbank",2
+            var m = Regex.Match(resp, @"\+COPS:\s*\d+,\d+,""([^""]+)""");
+            if (m.Success) return DecodeUcs2IfNeeded(m.Groups[1].Value);
+
+            // Pattern 2: +COPS: "Softbank"
+            m = Regex.Match(resp, @"\+COPS:\s*""([^""]+)""");
+            if (m.Success) return DecodeUcs2IfNeeded(m.Groups[1].Value);
+
+            // Pattern 3: Numeric MCC+MNC: +COPS: 0,2,"44020"
+            m = Regex.Match(resp, @"\+COPS:\s*\d+,\d+,""(\d{5,6})""");
+            if (m.Success) return MapMccMnc(m.Groups[1].Value);
+
+            // Try switching to alphanumeric format
+            if (resp.Contains("+COPS:"))
+            {
+                SendAndRead("AT+COPS=3,0", 2000);
+                Thread.Sleep(200);
+                resp = SendAndRead("AT+COPS?", 3000);
+                m = Regex.Match(resp, @"\+COPS:\s*\d+,\d+,""([^""]+)""");
+                if (m.Success) return DecodeUcs2IfNeeded(m.Groups[1].Value);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ QueryOperator failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    private static string MapMccMnc(string mccMnc) => mccMnc switch
+    {
+        "44020" => "SoftBank",
+        "44010" => "NTT DoCoMo",
+        "44050" or "44051" or "44053" or "44054" => "KDDI/AU",
+        "44000" or "44001" or "44002" or "44003" => "Y!mobile",
+        "44011" => "Rakuten Mobile",
+        _ => mccMnc,
+    };
 
     /// <summary>Phát hiện số điện thoại (CNUM → phonebook → null).</summary>
     public string? DetectPhoneNumber()

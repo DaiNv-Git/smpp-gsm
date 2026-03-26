@@ -21,6 +21,17 @@ public class SmsMessage
         "SENT" or "DELIVERED" => "✅",
         "FAILED" => "❌",
         "PENDING" => "⏳",
+        "RECEIVED" => "📨",
         _ => "❓"
     };
+
+    public string DirectionIcon => Direction == "IN" ? "📨" : "📤";
+
+    public string TimeDisplay => CreatedAt.ToString("HH:mm:ss dd/MM");
+
+    public string ShortContent => Content.Length > 50 ? Content[..50] + "…" : Content;
+
+    public string PhoneDisplay => Direction == "IN" ? SourceAddr : DestAddr;
+
+    public string DirectionText => Direction == "IN" ? "Nhận" : "Gửi";
 }

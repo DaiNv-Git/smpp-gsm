@@ -74,56 +74,214 @@
             </Grid>
         </Border>
 
-        <!-- ========== MAIN: SIM List (compact) ========== -->
-        <Grid Grid.Row="2" Margin="8,8,8,4">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
+        <!-- ========== MAIN: TabControl ========== -->
+        <TabControl Grid.Row="2" Margin="0" Padding="0" Background="Transparent" BorderThickness="0">
+            <TabControl.Resources>
+                <Style TargetType="TabItem">
+                    <Setter Property="Background" Value="{StaticResource BgSecondaryBrush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                    <Setter Property="Padding" Value="14,7"/>
+                    <Setter Property="FontSize" Value="12"/>
+                    <Setter Property="FontWeight" Value="SemiBold"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="TabItem">
+                                <Border x:Name="TabBorder" Padding="{TemplateBinding Padding}"
+                                    Background="{StaticResource BgPrimaryBrush}" BorderThickness="0,0,0,2"
+                                    BorderBrush="Transparent" Cursor="Hand">
+                                    <ContentPresenter ContentSource="Header" HorizontalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource AccentBlueBrush}"/>
+                                        <Setter Property="Foreground" Value="{StaticResource AccentBlueBrush}"/>
+                                    </Trigger>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource BgSecondaryBrush}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </TabControl.Resources>
 
-            <!-- Toolbar -->
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
-                <Button Content="🔍 Scan" Command="{Binding ScanCommand}"
-                    Padding="12,5" Background="{StaticResource AccentBlueBrush}" Foreground="White"
-                    FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
-                <Button Content="▶ Start" Command="{Binding StartWorkersCommand}"
-                    Padding="12,5" Background="{StaticResource AccentGreenBrush}" Foreground="White"
-                    FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
-                <Button Content="⏹ Stop" Command="{Binding StopWorkersCommand}"
-                    Padding="12,5" Background="{StaticResource AccentRedBrush}" Foreground="White"
-                    FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
-                <TextBlock Text="{Binding ScanStatus}" Foreground="{StaticResource TextSecondaryBrush}"
-                    VerticalAlignment="Center" FontSize="11"/>
-            </StackPanel>
+            <!-- ===== TAB 1: SIM List ===== -->
+            <TabItem Header="📱 SIM">
+                <Grid Margin="8,8,8,4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
 
-            <!-- SIM List -->
-            <DataGrid Grid.Row="1" ItemsSource="{Binding SimList}" AutoGenerateColumns="False"
-                IsReadOnly="True" Background="{StaticResource BgSecondaryBrush}"
-                Foreground="{StaticResource TextPrimaryBrush}" BorderThickness="0"
-                GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#2a2a4a"
-                RowBackground="{StaticResource BgSecondaryBrush}"
-                AlternatingRowBackground="#1a1a3e" HeadersVisibility="Column"
-                FontSize="11" RowHeight="26">
-                <DataGrid.ColumnHeaderStyle>
-                    <Style TargetType="DataGridColumnHeader">
-                        <Setter Property="Background" Value="{StaticResource BgCardBrush}"/>
-                        <Setter Property="Foreground" Value="{StaticResource AccentBlueBrush}"/>
-                        <Setter Property="Padding" Value="6,4"/>
-                        <Setter Property="FontWeight" Value="Bold"/>
-                        <Setter Property="FontSize" Value="11"/>
-                    </Style>
-                </DataGrid.ColumnHeaderStyle>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="COM" Binding="{Binding ComPort}" Width="55"/>
-                    <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="60"/>
-                    <DataGridTextColumn Header="SĐT" Binding="{Binding PhoneNumber}" Width="105"/>
-                    <DataGridTextColumn Header="Signal" Binding="{Binding SignalDisplay}" Width="50"/>
-                    <DataGridTextColumn Header="Sent" Binding="{Binding TotalSent}" Width="45"/>
-                    <DataGridTextColumn Header="Fail" Binding="{Binding TotalFailed}" Width="40"/>
-                    <DataGridTextColumn Header="Q" Binding="{Binding QueueSize}" Width="30"/>
-                </DataGrid.Columns>
-            </DataGrid>
-        </Grid>
+                    <!-- Toolbar -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                        <Button Content="🔍 Scan" Command="{Binding ScanCommand}"
+                            Padding="12,5" Background="{StaticResource AccentBlueBrush}" Foreground="White"
+                            FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                        <Button Content="▶ Start" Command="{Binding StartWorkersCommand}"
+                            Padding="12,5" Background="{StaticResource AccentGreenBrush}" Foreground="White"
+                            FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                        <Button Content="⏹ Stop" Command="{Binding StopWorkersCommand}"
+                            Padding="12,5" Background="{StaticResource AccentRedBrush}" Foreground="White"
+                            FontSize="12" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding ScanStatus}" Foreground="{StaticResource TextSecondaryBrush}"
+                            VerticalAlignment="Center" FontSize="11"/>
+                    </StackPanel>
+
+                    <!-- SIM List -->
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding SimList}" AutoGenerateColumns="False"
+                        IsReadOnly="True" Background="{StaticResource BgSecondaryBrush}"
+                        Foreground="{StaticResource TextPrimaryBrush}" BorderThickness="0"
+                        GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#2a2a4a"
+                        RowBackground="{StaticResource BgSecondaryBrush}"
+                        AlternatingRowBackground="#1a1a3e" HeadersVisibility="Column"
+                        FontSize="11" RowHeight="26">
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="{StaticResource BgCardBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBlueBrush}"/>
+                                <Setter Property="Padding" Value="6,4"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                                <Setter Property="FontSize" Value="11"/>
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="COM" Binding="{Binding ComPort}" Width="55"/>
+                            <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="60"/>
+                            <DataGridTextColumn Header="SĐT" Binding="{Binding PhoneNumber}" Width="105"/>
+                            <DataGridTextColumn Header="Nhà mạng" Binding="{Binding Provider}" Width="80"/>
+                            <DataGridTextColumn Header="Signal" Binding="{Binding SignalDisplay}" Width="50"/>
+                            <DataGridTextColumn Header="Sent" Binding="{Binding TotalSent}" Width="45"/>
+                            <DataGridTextColumn Header="Fail" Binding="{Binding TotalFailed}" Width="40"/>
+                            <DataGridTextColumn Header="Q" Binding="{Binding QueueSize}" Width="30"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <!-- ===== TAB 2: Messages ===== -->
+            <TabItem Header="💬 Tin nhắn">
+                <Grid Margin="8,8,8,4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Filter Bar -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                        <Button Padding="10,5" Margin="0,0,4,0" BorderThickness="0" Cursor="Hand"
+                            FontSize="11" FontWeight="Bold" Foreground="White"
+                            Command="{Binding FilterMessagesCommand}" CommandParameter="ALL">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#2a2a4a"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedFilter}" Value="ALL">
+                                            <Setter Property="Background" Value="{StaticResource AccentBlueBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="📋 Tất cả" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Padding="10,5" Margin="0,0,4,0" BorderThickness="0" Cursor="Hand"
+                            FontSize="11" FontWeight="Bold" Foreground="White"
+                            Command="{Binding FilterMessagesCommand}" CommandParameter="IN">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#2a2a4a"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedFilter}" Value="IN">
+                                            <Setter Property="Background" Value="{StaticResource AccentGreenBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="📨 Nhận" VerticalAlignment="Center"/>
+                                <Border Background="#06d6a033" CornerRadius="8" Padding="5,1" Margin="4,0,0,0">
+                                    <TextBlock Text="{Binding IncomingCount}" FontSize="10"/>
+                                </Border>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Padding="10,5" Margin="0,0,4,0" BorderThickness="0" Cursor="Hand"
+                            FontSize="11" FontWeight="Bold" Foreground="White"
+                            Command="{Binding FilterMessagesCommand}" CommandParameter="OUT">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#2a2a4a"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedFilter}" Value="OUT">
+                                            <Setter Property="Background" Value="{StaticResource AccentBlueBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="📤 Gửi" VerticalAlignment="Center"/>
+                                <Border Background="#4cc9f033" CornerRadius="8" Padding="5,1" Margin="4,0,0,0">
+                                    <TextBlock Text="{Binding OutgoingCount}" FontSize="10"/>
+                                </Border>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Padding="10,5" Margin="0,0,4,0" BorderThickness="0" Cursor="Hand"
+                            FontSize="11" FontWeight="Bold" Foreground="White"
+                            Command="{Binding FilterMessagesCommand}" CommandParameter="FAILED">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#2a2a4a"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedFilter}" Value="FAILED">
+                                            <Setter Property="Background" Value="{StaticResource AccentRedBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="❌ Lỗi" VerticalAlignment="Center"/>
+                                <Border Background="#ef476f33" CornerRadius="8" Padding="5,1" Margin="4,0,0,0">
+                                    <TextBlock Text="{Binding FailedCount}" FontSize="10"/>
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Message List -->
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding FilteredMessages}" AutoGenerateColumns="False"
+                        IsReadOnly="True" Background="{StaticResource BgSecondaryBrush}"
+                        Foreground="{StaticResource TextPrimaryBrush}" BorderThickness="0"
+                        GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#2a2a4a"
+                        RowBackground="{StaticResource BgSecondaryBrush}"
+                        AlternatingRowBackground="#1a1a3e" HeadersVisibility="Column"
+                        FontSize="11" RowHeight="28">
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="{StaticResource BgCardBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBlueBrush}"/>
+                                <Setter Property="Padding" Value="6,4"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                                <Setter Property="FontSize" Value="11"/>
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="" Binding="{Binding DirectionIcon}" Width="28"/>
+                            <DataGridTextColumn Header="Loại" Binding="{Binding DirectionText}" Width="42"/>
+                            <DataGridTextColumn Header="SĐT" Binding="{Binding PhoneDisplay}" Width="110"/>
+                            <DataGridTextColumn Header="Nội dung" Binding="{Binding ShortContent}" Width="*"/>
+                            <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeDisplay}" Width="100"/>
+                            <DataGridTextColumn Header="" Binding="{Binding StatusIcon}" Width="28"/>
+                            <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="75"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+        </TabControl>
 
         <!-- ========== STATUS BAR ========== -->
         <Border Grid.Row="3" Background="{StaticResource BgSecondaryBrush}" Padding="10,5">

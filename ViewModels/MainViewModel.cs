@@ -3,7 +3,9 @@ using CommunityToolkit.Mvvm.Input;
 using GsmAgent.Models;
 using GsmAgent.Services;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Media;
 
 namespace GsmAgent.ViewModels;
@@ -23,15 +25,24 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _scanStatus = "";
     [ObservableProperty] private string _statusMessage = "Sẵn sàng";
     [ObservableProperty] private AppSettings _settings;
+    [ObservableProperty] private string _selectedFilter = "ALL";
+    [ObservableProperty] private int _incomingCount;
+    [ObservableProperty] private int _outgoingCount;
+    [ObservableProperty] private int _failedCount;
 
     public ObservableCollection<SimCard> SimList { get; } = new();
     public ObservableCollection<SmsMessage> MessageList { get; } = new();
+    public ICollectionView FilteredMessages { get; private set; }
 
     public MainViewModel()
     {
         // Load saved settings
         _settings = SettingsManager.Load();
         _portManager = new SerialPortManager(_settings);
+
+        // Setup filtered view for messages
+        FilteredMessages = CollectionViewSource.GetDefaultView(MessageList);
+        FilteredMessages.Filter = FilterMessagesPredicate;
 
         Logger.Info("GSM Agent khởi động");
 
@@ -267,6 +278,33 @@ public partial class MainViewModel : ObservableObject
         TotalQueueSize = SimList.Sum(s => s.QueueSize);
         TotalSentCount = SimList.Sum(s => s.TotalSent);
         RateLimitedCount = SimList.Count(s => s.IsRateLimited);
+        UpdateMessageCounts();
+    }
+
+    private void UpdateMessageCounts()
+    {
+        IncomingCount = MessageList.Count(m => m.Direction == "IN");
+        OutgoingCount = MessageList.Count(m => m.Direction == "OUT");
+        FailedCount = MessageList.Count(m => m.Status == "FAILED");
+    }
+
+    [RelayCommand]
+    private void FilterMessages(string filter)
+    {
+        SelectedFilter = filter;
+        FilteredMessages.Refresh();
+    }
+
+    private bool FilterMessagesPredicate(object obj)
+    {
+        if (obj is not SmsMessage msg) return false;
+        return SelectedFilter switch
+        {
+            "IN" => msg.Direction == "IN",
+            "OUT" => msg.Direction == "OUT",
+            "FAILED" => msg.Status == "FAILED",
+            _ => true,
+        };
     }
 
     public void Cleanup()

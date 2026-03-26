@@ -127,8 +127,10 @@ public class SerialPortManager : IDisposable
             // 5. Signal level
             var signal = helper.GetSignalLevel();
 
-            // 6. Provider (from IMSI if not from DB)
-            provider ??= AtCommandHelper.DetectProvider(imsi);
+            // 6. Provider — prefer AT+COPS?, fallback to IMSI prefix
+            provider ??= helper.QueryOperator();
+            if (provider == null || provider == "Unknown" || provider == "UNKNOWN")
+                provider = AtCommandHelper.DetectProvider(imsi);
 
             return new SimCard
             {
@@ -138,7 +140,8 @@ public class SerialPortManager : IDisposable
                 PhoneNumber = phone,
                 Provider = provider,
                 SignalLevel = signal,
-                Status = !string.IsNullOrWhiteSpace(phone) ? SimStatus.Online : SimStatus.Offline,
+                // SIM is Online if it has CCID (physically present), regardless of phone number
+                Status = SimStatus.Online,
             };
         }
         catch (Exception ex)
