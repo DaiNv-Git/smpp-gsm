@@ -51,8 +51,9 @@ public class SerialPortManager : IDisposable
             System.Diagnostics.Debug.WriteLine($"📋 Tìm thấy {portNames.Length} COM ports");
 
             var newSims = new ConcurrentBag<SimCard>();
+            var failedPorts = new ConcurrentBag<string>();
 
-            // Scan parallel
+            // Pass 1: Scan parallel
             var tasks = portNames.Select(port => Task.Run(() =>
             {
                 var sim = ScanOnePort(port);
@@ -62,9 +63,34 @@ public class SerialPortManager : IDisposable
                     System.Diagnostics.Debug.WriteLine(
                         $"✅ {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"} Provider={sim.Provider}");
                 }
+                else
+                {
+                    failedPorts.Add(port);
+                }
             }));
 
             await Task.WhenAll(tasks);
+
+            // Pass 2: Retry failed ports (like old Java system)
+            if (failedPorts.Count > 0)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"🔁 SECOND PASS: {failedPorts.Count} ports chưa scan được, retry...");
+                await Task.Delay(300);
+
+                var retryTasks = failedPorts.Select(port => Task.Run(() =>
+                {
+                    var sim = ScanOnePort(port);
+                    if (sim != null)
+                    {
+                        newSims.Add(sim);
+                        System.Diagnostics.Debug.WriteLine(
+                            $"✅ [RETRY] {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"}");
+                    }
+                }));
+
+                await Task.WhenAll(retryTasks);
+            }
 
             // Update cache
             _sims.Clear();
@@ -72,7 +98,7 @@ public class SerialPortManager : IDisposable
                 _sims[sim.ComPort] = sim;
 
             System.Diagnostics.Debug.WriteLine(
-                $"✅ Scan hoàn tất: {_sims.Count} SIM(s) phát hiện");
+                $"✅ Scan hoàn tất: {_sims.Count} SIM(s) phát hiện (pass1={newSims.Count - failedPorts.Count}, retry={failedPorts.Count})");
 
             var result = _sims.Values.ToList();
             ScanCompleted?.Invoke(result);
@@ -151,13 +177,15 @@ public class SerialPortManager : IDisposable
         }
     }
 
-    /// <summary>Tra MongoDB qua BE API: GET /api/dashboard/sim-lookup?ccid=xxx</summary>
+    /// <summary>Tra MongoDB qua BE API: GET /api/dashboard/sim-lookup?ccid=xxx&fuzzy=true
+    /// Fuzzy mode: match 18 ký tự liên tục của CCID (like old Java system).</summary>
     private (string phone, string? provider)? LookupSimByCcid(string ccid)
     {
         try
         {
             using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            var url = $"{_settings.ServerUrl.TrimEnd('/')}/api/dashboard/sim-lookup?ccid={Uri.EscapeDataString(ccid)}";
+            // Fuzzy match: gửi fuzzy=true để BE match 18 ký tự liên tục (CCID có thể khác vài digits đầu/cuối)
+            var url = $"{_settings.ServerUrl.TrimEnd('/')}/api/dashboard/sim-lookup?ccid={Uri.EscapeDataString(ccid)}&fuzzy=true";
             var response = http.GetStringAsync(url).Result;
             var json = System.Text.Json.JsonDocument.Parse(response);
             var root = json.RootElement;
