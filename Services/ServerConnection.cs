@@ -1,3 +1,4 @@
+using System;
 using GsmAgent.Models;
 using Newtonsoft.Json;
 using SocketIOClient;

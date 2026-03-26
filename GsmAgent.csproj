@@ -3,9 +3,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
     <RootNamespace>GsmAgent</RootNamespace>
     <AssemblyName>GsmAgent</AssemblyName>
-    <ApplicationIcon>icon.ico</ApplicationIcon>
     <Version>1.0.0</Version>
     <Authors>SMPP System</Authors>
     <Description>GSM Agent - SIM Scanner &amp; SMS Gateway</Description>

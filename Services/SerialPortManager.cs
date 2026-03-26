@@ -1,3 +1,4 @@
+using System;
 using GsmAgent.Models;
 using System.Collections.Concurrent;
 using System.IO.Ports;
