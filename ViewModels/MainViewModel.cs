@@ -14,7 +14,8 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly SerialPortManager _portManager;
     private ServerConnection? _serverConnection;
-    private System.Timers.Timer? _periodicScanTimer;
+    private MongoDbService? _mongoDb;
+    private SimSyncService? _simSyncService;
 
     [ObservableProperty] private string _serverStatus = "Chưa kết nối";
     [ObservableProperty] private SolidColorBrush _serverStatusColor = Brushes.Gray;
@@ -29,6 +30,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _incomingCount;
     [ObservableProperty] private int _outgoingCount;
     [ObservableProperty] private int _failedCount;
+    [ObservableProperty] private string _mongoStatus = "Chưa kết nối";
+    [ObservableProperty] private SolidColorBrush _mongoStatusColor = Brushes.Gray;
 
     public ObservableCollection<SimCard> SimList { get; } = new();
     public ObservableCollection<SmsMessage> MessageList { get; } = new();
@@ -120,25 +123,65 @@ public partial class MainViewModel : ObservableObject
             StartWorkers();
         }
 
-        // Start periodic re-scan (5 min)
-        StartPeriodicScan();
+        // 🔗 Khởi động MongoDB sync (mỗi 5 phút)
+        InitMongoSync();
     }
 
-    private void StartPeriodicScan()
+    /// <summary>
+    /// 🔗 Khởi tạo MongoDB connection + SimSyncService.
+    /// Tương tự cơ chế trong simsmart-gsm (Java).
+    /// </summary>
+    private void InitMongoSync()
     {
-        _periodicScanTimer?.Dispose();
-        _periodicScanTimer = new System.Timers.Timer(_settings.ScanIntervalSec * 1000);
-        _periodicScanTimer.Elapsed += async (s, e) =>
+        if (!_settings.EnableMongoSync)
         {
-            Logger.Info("Periodic re-scan...");
-            // Only refresh signal levels, don't full re-scan
-            foreach (var worker in _portManager.Workers.Values)
+            Logger.Info("⏭️ MongoDB sync disabled trong settings");
+            return;
+        }
+
+        try
+        {
+            _mongoDb = new MongoDbService(_settings.MongoDbUri);
+
+            // 🔗 Inject MongoDB vào SerialPortManager để lookup phone trực tiếp
+            _portManager.SetMongoDb(_mongoDb);
+
+            Application.Current.Dispatcher.Invoke(() =>
             {
-                worker.RefreshSimInfo();
-            }
-            Application.Current.Dispatcher.Invoke(UpdateStats);
-        };
-        _periodicScanTimer.Start();
+                MongoStatus = "Đã kết nối";
+                MongoStatusColor = new SolidColorBrush(Color.FromRgb(6, 214, 160));
+            });
+
+            _simSyncService = new SimSyncService(_mongoDb, _portManager, _settings);
+
+            _simSyncService.LogMessage += msg =>
+            {
+                Application.Current.Dispatcher.Invoke(() => StatusMessage = msg);
+            };
+
+            _simSyncService.SyncCompleted += (synced, total) =>
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    ScanStatus = $"💾 MongoDB: {synced} SIM synced ({total} scanned)";
+                });
+            };
+
+            // 🔄 Bắt đầu scheduled sync (mỗi 5 phút)
+            _simSyncService.StartScheduledSync();
+
+            Logger.Info("✅ MongoDB sync initialized successfully");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"❌ MongoDB init failed: {ex.Message}");
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                MongoStatus = "Lỗi kết nối";
+                MongoStatusColor = Brushes.Red;
+                StatusMessage = $"❌ MongoDB: {ex.Message}";
+            });
+        }
     }
 
     private void ShowNotification(string title, string message)
@@ -161,6 +204,12 @@ public partial class MainViewModel : ObservableObject
         {
             await _portManager.ScanAllAsync();
             StatusMessage = $"Scan hoàn tất: {SimList.Count} SIM(s)";
+
+            // 🔗 Sync ngay vào MongoDB sau khi scan thủ công
+            if (_simSyncService != null)
+            {
+                _ = Task.Run(() => _simSyncService.SyncSimsToMongo());
+            }
         }
         catch (Exception ex)
         {
@@ -201,6 +250,20 @@ public partial class MainViewModel : ObservableObject
         SettingsManager.Save(Settings);
         StatusMessage = "✅ Cài đặt đã lưu";
         Logger.Info("Settings saved");
+    }
+
+    /// <summary>🔗 Manual trigger: Sync SIM → MongoDB ngay.</summary>
+    [RelayCommand]
+    private async Task SyncMongoAsync()
+    {
+        if (_simSyncService == null)
+        {
+            InitMongoSync();
+            return;
+        }
+
+        StatusMessage = "🔄 Đang sync MongoDB...";
+        await _simSyncService.SyncSimsToMongo();
     }
 
     private async Task ConnectToServerAsync()
@@ -310,7 +373,12 @@ public partial class MainViewModel : ObservableObject
     public void Cleanup()
     {
         Logger.Info("GSM Agent shutting down...");
-        _periodicScanTimer?.Dispose();
+
+        // 🛑 Shutdown handler: set INACTIVE tất cả SIM trong MongoDB
+        // Giống SimShutdownHandler.java
+        _simSyncService?.OnShutdown();
+
+        _simSyncService?.Dispose();
         _serverConnection?.Dispose();
         _portManager.Dispose();
     }

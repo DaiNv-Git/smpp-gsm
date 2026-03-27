@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("GSM Agent - SIM Scanner & SMS Gateway")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a04a187f1fdd3b0f897c1ef24516eb791067e7ff")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e559105be21552cce90c443f97c81d31c32076c9")]
 [assembly: System.Reflection.AssemblyProductAttribute("GsmAgent")]
 [assembly: System.Reflection.AssemblyTitleAttribute("GsmAgent")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

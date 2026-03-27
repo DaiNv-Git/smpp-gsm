@@ -4,17 +4,17 @@
 winexe
 C#
 .cs
-C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\
+/Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/obj/Debug/net8.0-windows/win-x64/
 GsmAgent
 none
 false
 TRACE;DEBUG;NET;NET8_0;NETCOREAPP
-C:\Users\Admin\Downloads\project\smpp-gsm\App.xaml
-1-1644662438
+/Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/App.xaml
+1-1655869064
 
-13-676530057
-209-1229361217
-Views\MainWindow.xaml;
+161504593938
+220317493759
+Views/MainWindow.xaml;
 
 False
 

@@ -15,6 +15,7 @@ public class SerialPortManager : IDisposable
     private readonly ConcurrentDictionary<string, SimCard> _sims = new();
     private readonly AppSettings _settings;
     private bool _scanning;
+    private MongoDbService? _mongoDb;
 
     public IReadOnlyDictionary<string, SimCard> Sims => _sims;
     public IReadOnlyDictionary<string, ModemWorker> Workers => _workers;
@@ -28,6 +29,12 @@ public class SerialPortManager : IDisposable
     public SerialPortManager(AppSettings settings)
     {
         _settings = settings;
+    }
+
+    /// <summary>Inject MongoDbService để lookup phone number trực tiếp từ DB khi scan.</summary>
+    public void SetMongoDb(MongoDbService mongoDb)
+    {
+        _mongoDb = mongoDb;
     }
 
     /// <summary>
@@ -128,25 +135,55 @@ public class SerialPortManager : IDisposable
             // 3. Phone number — AT command first
             var phone = helper.DetectPhoneNumber();
 
-            // 4. Fallback: query MongoDB via BE API (like simsmart-gsm)
+            // 4. Fallback: query MongoDB trực tiếp (ưu tiên) hoặc BE API
+            // Giống cơ chế của SimSyncService.java: AT command → DB fallback
             string? provider = null;
             if (string.IsNullOrWhiteSpace(phone))
             {
-                try
+                // 4a. Try MongoDB trực tiếp (nhanh hơn, không cần server)
+                if (_mongoDb != null)
                 {
-                    var lookup = LookupSimByCcid(ccid);
-                    if (lookup != null)
+                    try
                     {
-                        phone = lookup.Value.phone;
-                        provider = lookup.Value.provider;
+                        var dbSim = _mongoDb.FindByCcidFuzzy(ccid);
+                        if (dbSim != null && !string.IsNullOrWhiteSpace(dbSim.PhoneNumber))
+                        {
+                            phone = dbSim.PhoneNumber;
+                            provider = dbSim.SimProvider;
+                            System.Diagnostics.Debug.WriteLine(
+                                $"📱 [{comPort}] Số từ MongoDB: {phone} (CCID fuzzy match)");
+
+                            // Ghi số vào SIM phonebook để lần sau AT command đọc được
+                            try { helper.WritePhoneToSimPhonebook(phone); }
+                            catch { /* ignore */ }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
                         System.Diagnostics.Debug.WriteLine(
-                            $"📱 [{comPort}] Số từ DB: {phone} (CCID fuzzy match)");
+                            $"⚠️ [{comPort}] MongoDB lookup failed: {ex.Message}");
                     }
                 }
-                catch (Exception ex)
+
+                // 4b. Fallback: query via BE API (nếu MongoDB không có)
+                if (string.IsNullOrWhiteSpace(phone))
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"⚠️ [{comPort}] DB lookup failed: {ex.Message}");
+                    try
+                    {
+                        var lookup = LookupSimByCcid(ccid);
+                        if (lookup != null)
+                        {
+                            phone = lookup.Value.phone;
+                            provider = lookup.Value.provider;
+                            System.Diagnostics.Debug.WriteLine(
+                                $"📱 [{comPort}] Số từ API: {phone} (HTTP fallback)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"⚠️ [{comPort}] API lookup failed: {ex.Message}");
+                    }
                 }
             }
 
