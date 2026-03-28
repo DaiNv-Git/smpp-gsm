@@ -43,8 +43,8 @@ public class ServerConnection : IDisposable
                     new("agentId", _settings.AgentId),
                 },
                 Reconnection = true,
-                ReconnectionAttempts = int.MaxValue,
-                ReconnectionDelay = 3000,
+                ReconnectionAttempts = 5,       // Giới hạn retry (không spam vô tận)
+                ReconnectionDelay = 10000,       // 10s giữa mỗi lần thử
             });
 
             _socket.OnConnected += (s, e) =>

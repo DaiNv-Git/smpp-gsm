@@ -267,6 +267,8 @@ public class ModemWorker : IDisposable
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"🔄 [{_sim.ComPort}] SMS {task.MessageId} FAIL → retry #{task.RetryCount} trên SIM khác (đã thử: {string.Join(",", task.TriedPorts)})");
+                task.CompletionSource?.TrySetResult(false); // 🔥 Unblock manual sender ngay
+                task.CompletionSource = null; // Tránh set lại lần nữa ở SIM khác
                 _onRetryNeeded(task);
             }
             else
