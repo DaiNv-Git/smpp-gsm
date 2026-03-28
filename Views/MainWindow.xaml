@@ -69,10 +69,18 @@
     </Window.Resources>
 
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
         <Border Visibility="{Binding IsNotificationVisible, Converter={StaticResource BoolToVisibilityConverter}}"
             HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,14,0"
             Panel.ZIndex="10" CornerRadius="10" Padding="14,12" MaxWidth="280"
-            BorderThickness="1" BorderBrush="#2f58a6ff" Background="#ee1a2332">
+            BorderThickness="1" BorderBrush="#2f58a6ff" Background="#ee1a2332"
+            Grid.RowSpan="4">
             <StackPanel>
                 <TextBlock Text="{Binding NotificationTitle}" FontSize="12.5" FontWeight="Bold"
                     Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -81,12 +89,6 @@
                     Foreground="{StaticResource TextSecondaryBrush}"/>
             </StackPanel>
         </Border>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
 
         <!-- ═══════════════ HEADER ═══════════════ -->
         <Border Grid.Row="0" Padding="16,12" BorderThickness="0,0,0,1"

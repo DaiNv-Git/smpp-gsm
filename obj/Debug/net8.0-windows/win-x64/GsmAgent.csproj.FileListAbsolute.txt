@@ -998,3 +998,10 @@ C:/Users/Admin/Downloads/project/smpp-gsm/obj/Debug/net8.0-windows/win-x64/ref/G
 /Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/obj/Debug/net8.0-windows/win-x64/GsmAgent.pdb
 /Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/obj/Debug/net8.0-windows/win-x64/GsmAgent.genruntimeconfig.cache
 /Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/obj/Debug/net8.0-windows/win-x64/ref/GsmAgent.dll
+C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\GsmAgent.csproj.AssemblyReference.cache
+C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\App.baml
+C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\App.g.cs
+C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\GsmAgent_MarkupCompile.cache
+C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\GsmAgent.dll
+C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\refint\GsmAgent.dll
+C:\Users\Admin\Downloads\project\smpp-gsm\obj\Debug\net8.0-windows\win-x64\GsmAgent.pdb
