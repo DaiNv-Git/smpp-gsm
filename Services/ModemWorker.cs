@@ -114,6 +114,14 @@ public class ModemWorker : IDisposable
                 {
                     // URC mode: check buffer for +CMTI/+CMT
                     hasNewSms = _helper.CheckForNewSms();
+
+                    // Một số modem trả lời CNMI được nhưng không thực sự bắn URC ổn định.
+                    // Giữ polling định kỳ làm fallback để không bỏ sót SMS mới.
+                    if (!hasNewSms && (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= 5000)
+                    {
+                        _lastSmsCountCheck = DateTime.Now;
+                        hasNewSms = true;
+                    }
                 }
                 else
                 {

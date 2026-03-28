@@ -609,12 +609,18 @@ public class AtCommandHelper : IDisposable
         var lines = resp.Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
-            var headerMatch = Regex.Match(lines[i], @"\+CMGL:\s*(\d+),""[^""]*"",""([^""]*)"",""[^""]*"",""([^""]*)""");
+            var line = lines[i].Trim();
+            if (!line.StartsWith("+CMGL:"))
+                continue;
+
+            var headerMatch = Regex.Match(
+                line,
+                @"\+CMGL:\s*(\d+),""[^""]*"",""([^""]*)""(?:,""[^""]*"")?(?:,""([^""]*)"")?");
             if (headerMatch.Success && i + 1 < lines.Length)
             {
                 int index = int.Parse(headerMatch.Groups[1].Value);
                 string sender = DecodeUcs2IfNeeded(headerMatch.Groups[2].Value);
-                string timestamp = headerMatch.Groups[3].Value;
+                string timestamp = headerMatch.Groups[3].Success ? headerMatch.Groups[3].Value : "";
                 string content = lines[i + 1].Trim();
                 string decodedContent = DecodeUcs2IfNeeded(content);
 
