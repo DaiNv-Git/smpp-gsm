@@ -474,6 +474,95 @@ public class AtCommandHelper : IDisposable
         return -1;
     }
 
+    // ==================== PORTED FROM JAVA ====================
+
+    /// <summary>Chuyển SMS storage (giống Java: scan cả ME + SM).</summary>
+    public bool SetStorage(string storage)
+    {
+        try
+        {
+            var cmd = $"AT+CPMS=\"{storage}\",\"{storage}\",\"{storage}\"";
+            var resp = SendAndRead(cmd, 2000);
+            return resp.Contains("OK");
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Đọc SMS UNREAD only — nhanh hơn ALL (giống Java: listUnreadSmsText).</summary>
+    public List<(int index, string sender, string content, DateTime time)> ListUnreadSms(int timeoutMs = 5000)
+    {
+        var messages = new List<(int, string, string, DateTime)>();
+        try
+        {
+            SendAndRead("AT+CMGF=1", 500);
+            SendAndRead("AT+CSCS=\"UCS2\"", 500);
+            var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
+            ParseCmglResponse(resp, messages);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ ListUnreadSms failed: {ex.Message}");
+        }
+        return messages;
+    }
+
+    /// <summary>Đọc ALL SMS — fallback khi UNREAD trả rỗng (giống Java: listAllSmsText).</summary>
+    public List<(int index, string sender, string content, DateTime time)> ListAllSms(int timeoutMs = 10000)
+    {
+        var messages = new List<(int, string, string, DateTime)>();
+        try
+        {
+            SendAndRead("AT+CMGF=1", 500);
+            SendAndRead("AT+CSCS=\"UCS2\"", 500);
+            var resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
+            ParseCmglResponse(resp, messages);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ ListAllSms failed: {ex.Message}");
+        }
+        return messages;
+    }
+
+    /// <summary>Parse CMGL response chung (dùng cho cả UNREAD và ALL).</summary>
+    private void ParseCmglResponse(string resp, List<(int, string, string, DateTime)> messages)
+    {
+        var lines = resp.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var headerMatch = Regex.Match(lines[i], @"\+CMGL:\s*(\d+),""[^""]*"",""([^""]*)"",""[^""]*"",""([^""]*)""");
+            if (headerMatch.Success && i + 1 < lines.Length)
+            {
+                int index = int.Parse(headerMatch.Groups[1].Value);
+                string sender = DecodeUcs2IfNeeded(headerMatch.Groups[2].Value);
+                string timestamp = headerMatch.Groups[3].Value;
+                string content = lines[i + 1].Trim();
+                string decodedContent = DecodeUcs2IfNeeded(content);
+
+                var time = ParseSmsTimestamp(timestamp);
+                if (!string.IsNullOrWhiteSpace(decodedContent))
+                    messages.Add((index, sender, decodedContent, time));
+            }
+        }
+    }
+
+    /// <summary>Xóa tất cả SMS đã đọc trong storage hiện tại (giống Java: AT+CMGD=1,3).</summary>
+    public bool CleanupReadSms()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+CMGD=1,3", 3000); // flag 3 = delete read + sent + unsent
+            return resp.Contains("OK");
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Restore charset UCS2 cho đọc SMS tiếng Nhật (giống Java: setCharset("UCS2")).</summary>
+    public void RestoreUcs2Mode()
+    {
+        try { SendAndRead("AT+CSCS=\"UCS2\"", 300); } catch { }
+    }
+
     private static DateTime ParseSmsTimestamp(string ts)
     {
         try

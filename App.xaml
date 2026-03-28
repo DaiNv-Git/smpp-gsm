@@ -15,9 +15,9 @@
         <Color x:Key="AccentYellow">#d29922</Color>
         <Color x:Key="AccentPurple">#bc8cff</Color>
         <Color x:Key="AccentCyan">#39d2c0</Color>
-        <Color x:Key="TextPrimary">#e6edf3</Color>
-        <Color x:Key="TextSecondary">#8b949e</Color>
-        <Color x:Key="TextMuted">#484f58</Color>
+        <Color x:Key="TextPrimary">#f0f6fc</Color>
+        <Color x:Key="TextSecondary">#b1bac4</Color>
+        <Color x:Key="TextMuted">#6e7681</Color>
 
         <!-- Brushes -->
         <SolidColorBrush x:Key="BgPrimaryBrush" Color="{StaticResource BgPrimary}"/>
@@ -97,6 +97,82 @@
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="8,5"/>
             <Setter Property="FontSize" Value="11"/>
+        </Style>
+
+        <!-- ============ COMBOBOX DARK THEME ============ -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource BgCardBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="#1c2333"/>
+            <Setter Property="Foreground" Value="#e6edf3"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="#2a3a52"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#2458a6ff"/>
+                    <Setter Property="Foreground" Value="#58a6ff"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ============ TEXTBOX DARK THEME ============ -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource BgCardBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CaretBrush" Value="{StaticResource AccentBlueBrush}"/>
+            <Setter Property="SelectionBrush" Value="{StaticResource AccentBlueBrush}"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="ContextMenu">
+                <Setter.Value>
+                    <ContextMenu Background="#1c2333" Foreground="#f0f6fc"
+                        BorderBrush="#30363d" BorderThickness="1">
+                        <MenuItem Header="Cắt (Cut)" Command="ApplicationCommands.Cut"/>
+                        <MenuItem Header="Sao chép (Copy)" Command="ApplicationCommands.Copy"/>
+                        <MenuItem Header="Dán (Paste)" Command="ApplicationCommands.Paste"/>
+                        <Separator/>
+                        <MenuItem Header="Chọn tất cả" Command="ApplicationCommands.SelectAll"/>
+                    </ContextMenu>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentBlueBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ============ CONTEXT MENU / MENUITEM DARK ============ -->
+        <Style TargetType="ContextMenu">
+            <Setter Property="Background" Value="#1c2333"/>
+            <Setter Property="Foreground" Value="#f0f6fc"/>
+            <Setter Property="BorderBrush" Value="#30363d"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#f0f6fc"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="#2a3a52"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
     </Application.Resources>
 </Application>

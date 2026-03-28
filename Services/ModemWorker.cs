@@ -55,7 +55,11 @@ public class ModemWorker : IDisposable
     private bool _urcSupported;
     private int _lastSmsCount = -1;
     private DateTime _lastSmsCountCheck = DateTime.MinValue;
-    private readonly HashSet<string> _processedSmsHashes = new();
+
+    // 🔥 Ported from Java PortWorker
+    private int _scanCount = 0; // Track scan iterations for periodic cleanup
+    private readonly ConcurrentDictionary<string, DateTime> _processedSmsCache = new(); // TTL-based cache
+    private static readonly TimeSpan SmsCacheTtl = TimeSpan.FromMinutes(5);
 
     public bool Start()
     {
@@ -213,6 +217,9 @@ public class ModemWorker : IDisposable
 
             success = _helper.SendSms(task.DestAddr, task.Content);
 
+            // 🔥 Restore UCS2 cho đọc SMS tiếng Nhật (giống Java: setCharset("UCS2"))
+            _helper.RestoreUcs2Mode();
+
             if (success)
             {
                 _sim.RecordSuccess();
@@ -277,23 +284,91 @@ public class ModemWorker : IDisposable
         Thread.Sleep(_cooldownMs);
     }
 
+    /// <summary>
+    /// 🔥 Optimized SMS scan — ported from Java PortWorker.doScanSms()
+    /// 1. Dual storage: scan cả ME + SM
+    /// 2. UNREAD first → ALL fallback
+    /// 3. Periodic cleanup mỗi 50 scans
+    /// 4. TTL-based duplicate cache (5 phút)
+    /// </summary>
     private void ReadIncomingSms()
     {
         try
         {
-            var messages = _helper.ReadAllSmsWithIndex();
-            foreach (var (index, sender, content, time) in messages)
+            _scanCount++;
+
+            // 🧹 Periodic cleanup (giống Java: mỗi 50 scans)
+            if (_scanCount % 50 == 0)
             {
-                // Duplicate check: hash of sender+content+time
-                var hash = $"{sender}|{content}|{time:yyyyMMddHHmm}";
-                if (_processedSmsHashes.Contains(hash))
+                System.Diagnostics.Debug.WriteLine(
+                    $"🧹 [{_sim.ComPort}] Periodic storage cleanup (scan #{_scanCount})");
+                _helper.CleanupReadSms();
+
+                // Cleanup expired cache entries
+                var expired = _processedSmsCache
+                    .Where(kv => DateTime.Now - kv.Value > SmsCacheTtl)
+                    .Select(kv => kv.Key).ToList();
+                foreach (var key in expired)
+                    _processedSmsCache.TryRemove(key, out _);
+            }
+
+            var allMessages = new List<(int index, string sender, string content, DateTime time)>();
+
+            // 🔥 Dual storage scan: ME + SM (giống Java)
+            foreach (var storage in new[] { "ME", "SM" })
+            {
+                try
                 {
-                    // Already processed — just delete
+                    if (!_helper.SetStorage(storage))
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"⚠️ [{_sim.ComPort}] Cannot set storage to {storage}");
+                        continue;
+                    }
+
+                    // 🔥 UNREAD first (nhanh) → ALL fallback (giống Java)
+                    var smsInStore = _helper.ListUnreadSms(5000);
+
+                    if (smsInStore.Count == 0)
+                    {
+                        // Fallback: có thể modem auto-mark READ
+                        smsInStore = _helper.ListAllSms(5000);
+                        if (smsInStore.Count > 0)
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"🔴 [{_sim.ComPort}] Found {smsInStore.Count} SMS via ALL (not UNREAD) in {storage}");
+                        }
+                    }
+
+                    allMessages.AddRange(smsInStore);
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 [{_sim.ComPort}] Found {smsInStore.Count} SMS in {storage} (total {allMessages.Count})");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ [{_sim.ComPort}] Error scanning {storage}: {ex.Message}");
+                }
+            }
+
+            if (allMessages.Count == 0)
+                return;
+
+            int processedCount = 0;
+
+            foreach (var (index, sender, content, time) in allMessages)
+            {
+                // 🔥 TTL-based duplicate check (giống Java: processedSmsCache)
+                var hash = $"{sender}|{content}|{time:yyyyMMddHHmm}";
+                if (_processedSmsCache.ContainsKey(hash))
+                {
                     _helper.DeleteSms(index);
                     continue;
                 }
 
-                _processedSmsHashes.Add(hash);
+                _processedSmsCache[hash] = DateTime.Now;
+                processedCount++;
+
                 System.Diagnostics.Debug.WriteLine(
                     $"📨 [{_sim.ComPort}] SMS from {sender}: {content}");
                 _onIncomingSms?.Invoke(_sim.ComPort, sender, content, time);
@@ -302,21 +377,17 @@ public class ModemWorker : IDisposable
                 _helper.DeleteSms(index);
             }
 
-            // Update simulated URC count after deletion
-            if (messages.Count > 0)
+            // Update simulated URC count after processing
+            if (processedCount > 0)
             {
                 _lastSmsCount = _helper.GetSmsCount();
-            }
-
-            // Cleanup old hashes (keep last 500)
-            if (_processedSmsHashes.Count > 500)
-            {
-                _processedSmsHashes.Clear();
+                System.Diagnostics.Debug.WriteLine(
+                    $"✅ [{_sim.ComPort}] Processed {processedCount}/{allMessages.Count} SMS");
             }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"❌ ReadSMS error: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"❌ [{_sim.ComPort}] ReadSMS error: {ex.Message}");
         }
     }
 
