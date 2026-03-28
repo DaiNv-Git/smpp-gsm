@@ -432,43 +432,6 @@ public class AtCommandHelper : IDisposable
         }
     }
 
-    /// <summary>Đọc SMS từ modem — trả kèm index để xóa sau khi đọc.</summary>
-    public List<(int index, string sender, string content, DateTime time)> ReadAllSmsWithIndex()
-    {
-        var messages = new List<(int, string, string, DateTime)>();
-        try
-        {
-            SendAndRead("AT+CMGF=1", 500);
-            SendAndRead("AT+CSCS=\"UCS2\"", 500);
-            var resp = SendAndRead("AT+CMGL=\"ALL\"", 10000);
-
-            // Parse +CMGL: index,status,"sender","name","timestamp"
-            var lines = resp.Split('\n');
-            for (int i = 0; i < lines.Length; i++)
-            {
-                var headerMatch = Regex.Match(lines[i], @"\+CMGL:\s*(\d+),""[^""]*"",""([^""]*)"",""[^""]*"",""([^""]*)""");
-                if (headerMatch.Success && i + 1 < lines.Length)
-                {
-                    int index = int.Parse(headerMatch.Groups[1].Value);
-                    string sender = DecodeUcs2IfNeeded(headerMatch.Groups[2].Value);
-                    string timestamp = headerMatch.Groups[3].Value;
-                    string content = lines[i + 1].Trim();
-                    string decodedContent = DecodeUcs2IfNeeded(content);
-
-                    // Parse timestamp: "26/03/26,10:30:00+36" → DateTime
-                    var time = ParseSmsTimestamp(timestamp);
-
-                    if (!string.IsNullOrWhiteSpace(decodedContent))
-                        messages.Add((index, sender, decodedContent, time));
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"❌ ReadSMS failed: {ex.Message}");
-        }
-        return messages;
-    }
 
     /// <summary>Xóa 1 SMS theo index — gọi sau khi đã đọc xong.</summary>
     public bool DeleteSms(int index)
@@ -587,21 +550,6 @@ public class AtCommandHelper : IDisposable
         return messages;
     }
 
-    /// <summary>Đọc ALL SMS — fallback khi UNREAD trả rỗng (giống Java: listAllSmsText).</summary>
-    public List<(int index, string sender, string content, DateTime time)> ListAllSms(int timeoutMs = 10000)
-    {
-        var messages = new List<(int, string, string, DateTime)>();
-        try
-        {
-            var resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
-            ParseCmglResponse(resp, messages);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"⚠️ ListAllSms failed: {ex.Message}");
-        }
-        return messages;
-    }
 
     /// <summary>Parse CMGL response chung (dùng cho cả UNREAD và ALL).</summary>
     private void ParseCmglResponse(string resp, List<(int, string, string, DateTime)> messages)

@@ -10,7 +10,7 @@ namespace GsmAgent.Services;
 /// </summary>
 public class ModemWorker : IDisposable
 {
-    private const int SmsScanIntervalMs = 2000;
+    private const int SmsScanIntervalMs = 5000;
     private readonly AtCommandHelper _helper;
     private readonly BlockingCollection<SmsTask> _queue = new(100);
     private readonly CancellationTokenSource _cts = new();
@@ -111,15 +111,29 @@ public class ModemWorker : IDisposable
             {
                 bool hasNewSms = false;
 
-                // Ưu tiên URC khi modem có phát, nhưng luôn giữ periodic scan làm đường an toàn.
+                // Ưu tiên URC khi modem có phát
                 if (_urcSupported)
                     hasNewSms = _helper.CheckForNewSms();
 
+                // 🔥 Simulated URC: chỉ scan khi SMS count THỰC SỰ thay đổi
                 if (!hasNewSms &&
                     (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= SmsScanIntervalMs)
                 {
                     _lastSmsCountCheck = DateTime.Now;
-                    hasNewSms = true;
+                    var currentCount = _helper.GetSmsCount();
+                    if (currentCount > 0 && currentCount != _lastSmsCount)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📬 [{_sim.ComPort}] SMS count changed: {_lastSmsCount} → {currentCount}");
+                        _lastSmsCount = currentCount;
+                        hasNewSms = true;
+                    }
+                    else if (_lastSmsCount == -1)
+                    {
+                        // First boot: scan 1 lần
+                        _lastSmsCount = currentCount;
+                        hasNewSms = currentCount > 0;
+                    }
                 }
 
                 if (hasNewSms)
@@ -281,10 +295,10 @@ public class ModemWorker : IDisposable
     }
 
     /// <summary>
-    /// 🔥 Optimized SMS scan — ported from Java PortWorker.doScanSms()
+    /// 🔥 SMS scan — chỉ đọc UNREAD, xóa tin đã đọc định kỳ.
     /// 1. Dual storage: scan cả ME + SM
-    /// 2. UNREAD first → ALL fallback
-    /// 3. Periodic cleanup mỗi 50 scans
+    /// 2. Chỉ đọc UNREAD (không dùng ALL)
+    /// 3. Periodic cleanup mỗi 20 scans — xóa tất cả tin đã đọc
     /// 4. TTL-based duplicate cache (5 phút)
     /// </summary>
     private void ReadIncomingSms()
@@ -293,12 +307,16 @@ public class ModemWorker : IDisposable
         {
             _scanCount++;
 
-            // 🧹 Periodic cleanup (giống Java: mỗi 50 scans)
-            if (_scanCount % 50 == 0)
+            // 🧹 Periodic cleanup: xóa tất cả SMS đã đọc mỗi 20 scans
+            if (_scanCount % 20 == 0)
             {
                 System.Diagnostics.Debug.WriteLine(
-                    $"🧹 [{_sim.ComPort}] Periodic storage cleanup (scan #{_scanCount})");
-                _helper.CleanupReadSms();
+                    $"🧹 [{_sim.ComPort}] Periodic cleanup — xóa SMS đã đọc (scan #{_scanCount})");
+                foreach (var storage in new[] { "ME", "SM" })
+                {
+                    if (_helper.SetStorage(storage))
+                        _helper.CleanupReadSms();
+                }
 
                 // Cleanup expired cache entries
                 var expired = _processedSmsCache
@@ -310,11 +328,10 @@ public class ModemWorker : IDisposable
 
             var allMessages = new List<(string storage, int index, string sender, string content, DateTime time)>();
 
-            // 🔥 Set text mode + UCS2 charset 1 lần duy nhất trước khi scan
-            // (tránh gọi AT+CMGF=1 + AT+CSCS="UCS2" x4 mỗi scan cycle)
+            // Set text mode + UCS2 charset 1 lần trước khi scan
             _helper.PrepareForRead();
 
-            // 🔥 Dual storage scan: ME + SM (giống Java)
+            // 🔥 Chỉ đọc UNREAD — không fallback ALL
             foreach (var storage in new[] { "ME", "SM" })
             {
                 try
@@ -326,23 +343,14 @@ public class ModemWorker : IDisposable
                         continue;
                     }
 
-                    // 🔥 UNREAD first (nhanh) → ALL fallback (giống Java)
                     var smsInStore = _helper.ListUnreadSms(5000);
 
-                    if (smsInStore.Count == 0)
-                    {
-                        // Fallback: có thể modem auto-mark READ
-                        smsInStore = _helper.ListAllSms(5000);
-                        if (smsInStore.Count > 0)
-                        {
-                            System.Diagnostics.Debug.WriteLine(
-                                $"🔴 [{_sim.ComPort}] Found {smsInStore.Count} SMS via ALL (not UNREAD) in {storage}");
-                        }
-                    }
-
                     allMessages.AddRange(smsInStore.Select(m => (storage, m.index, m.sender, m.content, m.time)));
-                    System.Diagnostics.Debug.WriteLine(
-                        $"📬 [{_sim.ComPort}] Found {smsInStore.Count} SMS in {storage} (total {allMessages.Count})");
+                    if (smsInStore.Count > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📬 [{_sim.ComPort}] Found {smsInStore.Count} UNREAD SMS in {storage}");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -376,11 +384,13 @@ public class ModemWorker : IDisposable
 
             foreach (var (storage, index, sender, content, time) in allMessages)
             {
-                // Dùng storage + index + payload để nhận diện ổn định cùng một SMS
-                // ngay cả khi modem trả timestamp không parse được.
-                var hash = $"{storage}|{index}|{sender}|{content}";
+                // 🔥 FIX: Dùng sender + content + time (KHÔNG dùng index vì modem tái sử dụng index sau khi xóa)
+                var hash = $"{sender}|{content}|{time:yyyyMMddHHmmss}";
                 if (_processedSmsCache.ContainsKey(hash))
                 {
+                    // Đã xử lý rồi → chỉ xóa trên modem (nếu lần trước xóa lỗi)
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⏭️ [{_sim.ComPort}] Skip duplicate SMS (already processed): {sender} | {content.Substring(0, Math.Min(30, content.Length))}...");
                     if (EnsureStorage(storage))
                         _helper.DeleteSms(index);
                     continue;
