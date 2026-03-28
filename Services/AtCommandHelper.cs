@@ -318,16 +318,27 @@ public class AtCommandHelper : IDisposable
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
 
-                // 🔥 FIX: LUÔN dùng GSM charset cho AT command interface
-                // → số điện thoại trong AT+CMGS giữ plain text
-                // → DCS=8 trong AT+CSMP báo modem content body là UCS2
                 SendAndRead("AT+CMGF=1", 500);
-                SendAndRead("AT+CSCS=\"GSM\"", 500);
+
+                string cmgsDest;
+                string actualContent;
 
                 if (isUnicode)
-                    SendAndRead("AT+CSMP=17,167,0,8", 500);  // DCS=8 → UCS2 content
+                {
+                    // 🔥 Unicode: CSCS=UCS2, số ĐT cũng phải encode UCS2 hex
+                    SendAndRead("AT+CSCS=\"UCS2\"", 500);
+                    SendAndRead("AT+CSMP=17,167,0,8", 500);
+                    cmgsDest = EncodeUcs2(normalizedDest);  // "+81..." → "002B003800310030..."
+                    actualContent = EncodeUcs2(content);
+                }
                 else
-                    SendAndRead("AT+CSMP=17,167,0,0", 500);  // DCS=0 → GSM 7bit
+                {
+                    // ASCII: CSCS=GSM, số ĐT plain text
+                    SendAndRead("AT+CSCS=\"GSM\"", 500);
+                    SendAndRead("AT+CSMP=17,167,0,0", 500);
+                    cmgsDest = normalizedDest;
+                    actualContent = content;
+                }
 
                 System.Diagnostics.Debug.WriteLine(
                     $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
@@ -340,7 +351,7 @@ public class AtCommandHelper : IDisposable
                         _pendingUrc = true;
                 }
                 _port.DiscardInBuffer();
-                _port.Write($"AT+CMGS=\"{normalizedDest}\"\r");
+                _port.Write($"AT+CMGS=\"{cmgsDest}\"\r");
 
                 // Đợi prompt > với timeout
                 var promptDeadline = DateTime.Now.AddMilliseconds(5000);
@@ -375,8 +386,7 @@ public class AtCommandHelper : IDisposable
                     return false;
                 }
 
-                // Gửi content (UCS2 hex nếu unicode, plain text nếu ASCII)
-                string actualContent = isUnicode ? EncodeUcs2(content) : content;
+                // Gửi content + Ctrl+Z
                 _port.Write(actualContent);
                 Thread.Sleep(300);
                 _port.Write(new byte[] { 0x1A }, 0, 1); // Ctrl+Z
