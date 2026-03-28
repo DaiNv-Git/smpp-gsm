@@ -6,10 +6,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>GsmAgent</RootNamespace>
-    <AssemblyName>GsmAgent</AssemblyName>
+    <AssemblyName>SmsGlobal</AssemblyName>
+    <AssemblyTitle>SMS Global</AssemblyTitle>
+    <Product>SMS Global</Product>
     <Version>1.0.0</Version>
-    <Authors>SMPP System</Authors>
-    <Description>GSM Agent - SIM Scanner &amp; SMS Gateway</Description>
+    <Authors>SMS Global Hub</Authors>
+    <Description>SMS Global - GSM Agent &amp; SMS Gateway</Description>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -22,5 +25,10 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="MongoDB.Driver" Version="2.28.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\logo.png" />
+    <Resource Include="Assets\app.ico" />
   </ItemGroup>
 </Project>
