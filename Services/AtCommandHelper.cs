@@ -303,31 +303,60 @@ public class AtCommandHelper : IDisposable
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
 
                 string actualContent;
-                string normalizedDest;
+                // 🔥 FIX #1: Số đích LUÔN dùng format chuẩn quốc tế (giữ dấu +, KHÔNG encode UCS2)
+                // AT+CMGS nhận số dạng text thường, UCS2 encoding chỉ áp dụng cho NỘI DUNG SMS
+                string normalizedDest = NormalizeNumber(destNumber);
 
                 if (isUnicode)
                 {
                     SendAndRead("AT+CSCS=\"UCS2\"", 500);
                     SendAndRead("AT+CSMP=17,167,0,8", 500);
                     actualContent = EncodeUcs2(content);
-                    normalizedDest = EncodeUcs2(NormalizeNumber(destNumber));
                 }
                 else
                 {
                     SendAndRead("AT+CSCS=\"GSM\"", 500);
                     actualContent = content;
-                    normalizedDest = NormalizeNumber(destNumber).Replace("+", "");
                 }
 
-                // CMGS
+                System.Diagnostics.Debug.WriteLine(
+                    $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
+
+                // CMGS — 🔥 FIX #2: Đợi prompt > bằng loop có timeout (không fix cứng 1s)
                 _port.DiscardInBuffer();
                 _port.Write($"AT+CMGS=\"{normalizedDest}\"\r");
-                Thread.Sleep(1000);
 
-                // Read prompt >
-                var prompt = _port.ReadExisting();
-                if (!prompt.Contains(">") && prompt.Contains("ERROR"))
+                var promptDeadline = DateTime.Now.AddMilliseconds(5000);
+                var promptSb = new StringBuilder();
+                bool gotPrompt = false;
+                while (DateTime.Now < promptDeadline)
+                {
+                    if (_port.BytesToRead > 0)
+                    {
+                        promptSb.Append(_port.ReadExisting());
+                        var promptStr = promptSb.ToString();
+                        if (promptStr.Contains(">"))
+                        {
+                            gotPrompt = true;
+                            break;
+                        }
+                        if (promptStr.Contains("ERROR"))
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"❌ SendSms: AT+CMGS returned ERROR: {promptStr}");
+                            return false;
+                        }
+                    }
+                    Thread.Sleep(100);
+                }
+
+                if (!gotPrompt)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"❌ SendSms: No '>' prompt after 5s (got: {promptSb})");
+                    try { _port.Write(new byte[] { 0x1B }, 0, 1); } catch { } // ESC để cancel
                     return false;
+                }
 
                 // Send content + Ctrl+Z
                 _port.Write(actualContent);
@@ -577,11 +606,11 @@ public class AtCommandHelper : IDisposable
 
     // ==================== Utilities ====================
 
+    /// <summary>Chuẩn hóa số điện thoại — hỗ trợ cả 3 format: +81xxx, 81xxx, 0xxx.
+    /// Không tự chuyển đổi giữa các format — giữ nguyên số người dùng nhập.</summary>
     public static string NormalizeNumber(string phone)
     {
-        phone = phone.Trim().Replace(" ", "");
-        if (phone.StartsWith("0") && phone.Length >= 10)
-            phone = "+81" + phone[1..]; // Japan format
+        phone = phone.Trim().Replace(" ", "").Replace("-", "");
         return phone;
     }
 

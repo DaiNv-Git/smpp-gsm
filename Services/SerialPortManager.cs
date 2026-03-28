@@ -326,27 +326,42 @@ public class SerialPortManager : IDisposable
 
     /// <summary>
     /// 📤 Gửi SMS thủ công qua 1 SIM cụ thể (theo COM port).
-    /// Ưu tiên dùng worker nếu đang chạy, nếu không thì mở port trực tiếp.
+    /// Đợi kết quả thật từ AT command (không return ngay khi enqueue).
     /// </summary>
     public async Task<(bool success, string message)> SendSmsViaPort(string comPort, string destNumber, string content)
     {
         try
         {
-            // 1. Thử gửi qua worker đang chạy (nhanh, không cần mở port mới)
+            // 1. Gửi qua worker đang chạy — ĐỢI kết quả thật
             if (_workers.TryGetValue(comPort, out var worker) && worker.IsRunning)
             {
+                var tcs = new TaskCompletionSource<bool>();
                 var task = new SmsTask
                 {
                     MessageId = $"MANUAL-{DateTime.Now.Ticks}",
                     DestAddr = destNumber,
                     SourceAddr = _sims.TryGetValue(comPort, out var s) ? s.PhoneNumber ?? "" : "",
                     Content = content,
+                    CompletionSource = tcs, // 🆕 Đợi kết quả thật
                 };
                 worker.EnqueueSms(task);
-                return (true, $"✅ SMS đã đưa vào hàng đợi {comPort}");
+
+                // Đợi worker gửi xong (timeout 60s)
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(60000));
+                if (completed == tcs.Task)
+                {
+                    var ok = await tcs.Task;
+                    return ok
+                        ? (true, $"✅ SMS đã gửi thành công qua {comPort}")
+                        : (false, $"❌ Gửi SMS thất bại qua {comPort}");
+                }
+                else
+                {
+                    return (false, $"⏰ Timeout 60s — SMS có thể đang gửi qua {comPort}");
+                }
             }
 
-            // 2. Mở port trực tiếp và gửi
+            // 2. Mở port trực tiếp và gửi (khi worker chưa chạy)
             return await Task.Run(() =>
             {
                 using var helper = new AtCommandHelper(comPort, _settings.BaudRate);

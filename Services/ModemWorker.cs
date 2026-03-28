@@ -196,7 +196,8 @@ public class ModemWorker : IDisposable
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"⛔ [{_sim.ComPort}] SIM đạt giới hạn {_sim.DailyLimit} SMS/ngày — skip");
-                _onRetryNeeded?.Invoke(task); // try another SIM
+                task.CompletionSource?.TrySetResult(false);
+                _onRetryNeeded?.Invoke(task);
                 _sim.Status = SimStatus.Online;
                 _onSimUpdated(_sim);
                 return;
@@ -206,6 +207,7 @@ public class ModemWorker : IDisposable
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"🚫 [{_sim.ComPort}] SIM bị block đến {_sim.BlockedUntil:HH:mm:ss} — skip");
+                task.CompletionSource?.TrySetResult(false);
                 _onRetryNeeded?.Invoke(task);
                 _sim.Status = SimStatus.Online;
                 _onSimUpdated(_sim);
@@ -273,11 +275,13 @@ public class ModemWorker : IDisposable
                 _onSmsResult(task.MessageId, "FAILED", false, error);
                 System.Diagnostics.Debug.WriteLine(
                     $"❌ [{_sim.ComPort}] SMS {task.MessageId} FAILED sau {task.RetryCount} lần retry");
+                task.CompletionSource?.TrySetResult(false); // 🆕 Notify manual sender
             }
         }
         else
         {
             _onSmsResult(task.MessageId, "DELIVERED", true, null);
+            task.CompletionSource?.TrySetResult(true); // 🆕 Notify manual sender
         }
 
         // Cooldown between SMS
@@ -423,4 +427,7 @@ public class SmsTask
     public DateTime QueuedAt { get; set; } = DateTime.Now;
     public int RetryCount { get; set; }
     public HashSet<string> TriedPorts { get; set; } = new();
+
+    /// <summary>🆕 Nếu set, ProcessSmsTask sẽ complete khi gửi xong (cho manual SMS await kết quả).</summary>
+    public TaskCompletionSource<bool>? CompletionSource { get; set; }
 }

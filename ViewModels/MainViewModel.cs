@@ -350,22 +350,23 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = message;
             Logger.Info($"SMS Manual: {SelectedSim.ComPort} → {SmsDestNumber}: {(success ? "OK" : "FAIL")}");
 
+            // Thêm vào message list (cả thành công lẫn thất bại)
+            MessageList.Insert(0, new SmsMessage
+            {
+                MessageId = $"MANUAL-{DateTime.Now.Ticks}",
+                SourceAddr = SelectedSim.PhoneNumber ?? SelectedSim.ComPort,
+                DestAddr = SmsDestNumber,
+                Content = SmsContent,
+                Direction = "OUT",
+                Status = success ? "SENT" : "FAILED",
+                CreatedAt = DateTime.Now,
+            });
+
+            // 🔥 Fix bộ đếm: update CẢ header counter + message counter
+            UpdateStats();
+
             if (success)
             {
-                // Thêm vào message list
-                MessageList.Insert(0, new SmsMessage
-                {
-                    MessageId = $"MANUAL-{DateTime.Now.Ticks}",
-                    SourceAddr = SelectedSim.PhoneNumber ?? SelectedSim.ComPort,
-                    DestAddr = SmsDestNumber,
-                    Content = SmsContent,
-                    Direction = "OUT",
-                    Status = "SENT",
-                    CreatedAt = DateTime.Now,
-                });
-                UpdateMessageCounts();
-
-                // Clear content sau khi gửi thành công
                 SmsContent = "";
             }
         }
