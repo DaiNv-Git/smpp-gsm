@@ -3,25 +3,100 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     StartupUri="Views/MainWindow.xaml">
     <Application.Resources>
-        <!-- Dark Theme Colors -->
-        <Color x:Key="BgPrimary">#1a1a2e</Color>
-        <Color x:Key="BgSecondary">#16213e</Color>
-        <Color x:Key="BgCard">#0f3460</Color>
-        <Color x:Key="AccentBlue">#4cc9f0</Color>
-        <Color x:Key="AccentGreen">#06d6a0</Color>
-        <Color x:Key="AccentRed">#ef476f</Color>
-        <Color x:Key="AccentYellow">#ffd166</Color>
-        <Color x:Key="TextPrimary">#e0e0e0</Color>
-        <Color x:Key="TextSecondary">#8892b0</Color>
+        <!-- ============ DARK THEME COLORS ============ -->
+        <Color x:Key="BgPrimary">#0d1117</Color>
+        <Color x:Key="BgSecondary">#161b22</Color>
+        <Color x:Key="BgCard">#1c2333</Color>
+        <Color x:Key="BgCardHover">#242d3d</Color>
+        <Color x:Key="BorderSubtle">#30363d</Color>
+        <Color x:Key="AccentBlue">#58a6ff</Color>
+        <Color x:Key="AccentGreen">#3fb950</Color>
+        <Color x:Key="AccentRed">#f85149</Color>
+        <Color x:Key="AccentYellow">#d29922</Color>
+        <Color x:Key="AccentPurple">#bc8cff</Color>
+        <Color x:Key="AccentCyan">#39d2c0</Color>
+        <Color x:Key="TextPrimary">#e6edf3</Color>
+        <Color x:Key="TextSecondary">#8b949e</Color>
+        <Color x:Key="TextMuted">#484f58</Color>
 
+        <!-- Brushes -->
         <SolidColorBrush x:Key="BgPrimaryBrush" Color="{StaticResource BgPrimary}"/>
         <SolidColorBrush x:Key="BgSecondaryBrush" Color="{StaticResource BgSecondary}"/>
         <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCard}"/>
+        <SolidColorBrush x:Key="BgCardHoverBrush" Color="{StaticResource BgCardHover}"/>
+        <SolidColorBrush x:Key="BorderSubtleBrush" Color="{StaticResource BorderSubtle}"/>
         <SolidColorBrush x:Key="AccentBlueBrush" Color="{StaticResource AccentBlue}"/>
         <SolidColorBrush x:Key="AccentGreenBrush" Color="{StaticResource AccentGreen}"/>
         <SolidColorBrush x:Key="AccentRedBrush" Color="{StaticResource AccentRed}"/>
         <SolidColorBrush x:Key="AccentYellowBrush" Color="{StaticResource AccentYellow}"/>
+        <SolidColorBrush x:Key="AccentPurpleBrush" Color="{StaticResource AccentPurple}"/>
+        <SolidColorBrush x:Key="AccentCyanBrush" Color="{StaticResource AccentCyan}"/>
         <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimary}"/>
         <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
+        <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMuted}"/>
+
+        <!-- ============ MODERN BUTTON STYLE ============ -->
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}"
+                            BorderThickness="1" BorderBrush="Transparent"
+                            RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.88"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="#40FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.72"/>
+                                <Setter TargetName="border" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <ScaleTransform ScaleX="0.97" ScaleY="0.97"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============ MODERN SCROLLBAR ============ -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Height" Value="8"/>
+                    <Setter Property="Width" Value="Auto"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ============ TOOLTIP STYLE ============ -->
+        <Style TargetType="ToolTip">
+            <Setter Property="Background" Value="{StaticResource BgCardBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="FontSize" Value="11"/>
+        </Style>
     </Application.Resources>
 </Application>

@@ -22,6 +22,7 @@ public class SerialPortManager : IDisposable
     public bool IsScanning => _scanning;
 
     public event Action<SimCard>? SimUpdated;
+    public event Action<SimCard>? SimScanned; // 🆕 Fired immediately when each SIM is scanned (realtime)
     public event Action<List<SimCard>>? ScanCompleted;
     public event Action<string, string, DateTime>? IncomingSms; // sender, content, time
     public event Action<string, string, bool, string?>? SmsResult; // messageId, status, success, error
@@ -60,13 +61,15 @@ public class SerialPortManager : IDisposable
             var newSims = new ConcurrentBag<SimCard>();
             var failedPorts = new ConcurrentBag<string>();
 
-            // Pass 1: Scan parallel
+            // Pass 1: Scan parallel — fire SimScanned immediately for realtime UI
             var tasks = portNames.Select(port => Task.Run(() =>
             {
                 var sim = ScanOnePort(port);
                 if (sim != null)
                 {
                     newSims.Add(sim);
+                    // 🔥 Progressive loading: push SIM to UI immediately
+                    SimScanned?.Invoke(sim);
                     System.Diagnostics.Debug.WriteLine(
                         $"✅ {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"} Provider={sim.Provider}");
                 }
@@ -91,6 +94,8 @@ public class SerialPortManager : IDisposable
                     if (sim != null)
                     {
                         newSims.Add(sim);
+                        // 🔥 Progressive: push retry results to UI too
+                        SimScanned?.Invoke(sim);
                         System.Diagnostics.Debug.WriteLine(
                             $"✅ [RETRY] {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"}");
                     }

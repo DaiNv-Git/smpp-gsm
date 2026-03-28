@@ -49,6 +49,35 @@ public partial class MainViewModel : ObservableObject
 
         Logger.Info("GSM Agent khởi động");
 
+        // 🔥 Progressive loading: hiển thị từng SIM ngay khi scan được
+        _portManager.SimScanned += sim =>
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                // Check duplicate by ComPort
+                var existing = SimList.FirstOrDefault(s => s.ComPort == sim.ComPort);
+                if (existing != null)
+                {
+                    var idx = SimList.IndexOf(existing);
+                    SimList[idx] = sim;
+                }
+                else
+                {
+                    // Insert sorted by ComPort
+                    int insertIdx = 0;
+                    for (int i = 0; i < SimList.Count; i++)
+                    {
+                        if (string.Compare(SimList[i].ComPort, sim.ComPort, StringComparison.Ordinal) > 0)
+                            break;
+                        insertIdx = i + 1;
+                    }
+                    SimList.Insert(insertIdx, sim);
+                }
+                UpdateStats();
+                ScanStatus = $"🔍 Đang scan... ({SimList.Count} SIM)";
+            });
+        };
+
         _portManager.SimUpdated += sim =>
         {
             Application.Current.Dispatcher.Invoke(() =>
@@ -67,14 +96,30 @@ public partial class MainViewModel : ObservableObject
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                SimList.Clear();
-                foreach (var sim in sims.OrderBy(s => s.ComPort))
-                    SimList.Add(sim);
+                // Final reconciliation: remove SIMs not in final list
+                var finalPorts = new HashSet<string>(sims.Select(s => s.ComPort));
+                for (int i = SimList.Count - 1; i >= 0; i--)
+                {
+                    if (!finalPorts.Contains(SimList[i].ComPort))
+                        SimList.RemoveAt(i);
+                }
+
+                // Update any SIMs that changed during scan
+                foreach (var sim in sims)
+                {
+                    var existing = SimList.FirstOrDefault(s => s.ComPort == sim.ComPort);
+                    if (existing != null)
+                    {
+                        var idx = SimList.IndexOf(existing);
+                        SimList[idx] = sim;
+                    }
+                }
+
                 UpdateStats();
                 ScanStatus = $"✅ Scan xong: {sims.Count} SIM";
                 Logger.Info($"Scan hoàn tất: {sims.Count} SIM(s)");
 
-                // 🔥 Report SIM + Device info lên server → lưu DB
+                // 🔗 Report SIM + Device info lên server → lưu DB
                 _serverConnection?.ReportSims();
             });
         };
@@ -105,11 +150,8 @@ public partial class MainViewModel : ObservableObject
             });
         };
 
-        // Auto-scan on startup
-        if (_settings.AutoScan)
-        {
-            _ = AutoStartAsync();
-        }
+        // 🚀 Auto-scan on startup (always — SIM list should be populated immediately)
+        _ = AutoStartAsync();
     }
 
     private async Task AutoStartAsync()
@@ -198,6 +240,8 @@ public partial class MainViewModel : ObservableObject
     {
         ScanStatus = "🔍 Đang scan COM ports...";
         StatusMessage = "Scanning...";
+        SimList.Clear(); // Clear để progressive loading thêm từng SIM
+        UpdateStats();
         Logger.Info("Manual scan started");
 
         try
