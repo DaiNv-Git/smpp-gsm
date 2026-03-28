@@ -1,6 +1,7 @@
 <Window x:Class="GsmAgent.Views.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:GsmAgent.Views"
     Title="GSM Agent" Height="620" Width="520"
     MinHeight="500" MinWidth="440"
     WindowStartupLocation="CenterScreen"
@@ -461,6 +462,87 @@
                                 <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="75"/>
                             </DataGrid.Columns>
                         </DataGrid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- ═══════ TAB 3: Gửi SMS ═══════ -->
+            <TabItem Header="📤  Gửi SMS">
+                <Grid Margin="12,10,12,6">
+                    <Border CornerRadius="10" BorderThickness="1"
+                        BorderBrush="{StaticResource BorderSubtleBrush}"
+                        Background="{StaticResource BgSecondaryBrush}"
+                        Padding="20,16" VerticalAlignment="Top">
+                        <StackPanel>
+                            <!-- Title -->
+                            <TextBlock Text="Gửi tin nhắn SMS" FontSize="16" FontWeight="Bold"
+                                Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,16"/>
+
+                            <!-- Chọn SIM -->
+                            <TextBlock Text="Chọn SIM gửi" FontSize="11"
+                                Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,5"/>
+                            <ComboBox ItemsSource="{Binding SimList}"
+                                SelectedItem="{Binding SelectedSim}"
+                                DisplayMemberPath="SimDisplayName"
+                                Background="{StaticResource BgCardBrush}"
+                                Foreground="{StaticResource TextPrimaryBrush}"
+                                BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" Padding="10,8" FontSize="12"
+                                Margin="0,0,0,14"/>
+
+                            <!-- Số đích -->
+                            <TextBlock Text="Số điện thoại đích" FontSize="11"
+                                Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding SmsDestNumber, UpdateSourceTrigger=PropertyChanged}"
+                                Background="{StaticResource BgCardBrush}"
+                                Foreground="{StaticResource TextPrimaryBrush}"
+                                BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" Padding="10,8" FontSize="13"
+                                Margin="0,0,0,14"
+                                CaretBrush="{StaticResource AccentBlueBrush}"/>
+
+                            <!-- Nội dung -->
+                            <TextBlock Text="Nội dung tin nhắn" FontSize="11"
+                                Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding SmsContent, UpdateSourceTrigger=PropertyChanged}"
+                                Background="{StaticResource BgCardBrush}"
+                                Foreground="{StaticResource TextPrimaryBrush}"
+                                BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" Padding="10,8" FontSize="13"
+                                Height="80" TextWrapping="Wrap"
+                                AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
+                                Margin="0,0,0,16"
+                                CaretBrush="{StaticResource AccentBlueBrush}"/>
+
+                            <!-- Nút gửi + Kết quả -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Button Grid.Column="0" Style="{StaticResource ModernButton}"
+                                    Command="{Binding SendSmsCommand}"
+                                    IsEnabled="{Binding IsSending, Converter={x:Static local:InverseBoolConverter.Instance}}"
+                                    Padding="20,10" Margin="0,0,12,0">
+                                    <Button.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#58a6ff" Offset="0"/>
+                                            <GradientStop Color="#388bfd" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Button.Background>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="📤" Margin="0,0,6,0" FontSize="14"/>
+                                        <TextBlock Text="Gửi SMS" FontSize="13" FontWeight="Bold"/>
+                                    </StackPanel>
+                                </Button>
+
+                                <TextBlock Grid.Column="1" Text="{Binding SmsResult}"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    FontSize="12" VerticalAlignment="Center"
+                                    TextWrapping="Wrap"/>
+                            </Grid>
+                        </StackPanel>
                     </Border>
                 </Grid>
             </TabItem>

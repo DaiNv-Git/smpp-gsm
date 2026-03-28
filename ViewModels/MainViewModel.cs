@@ -33,6 +33,13 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _mongoStatus = "Chưa kết nối";
     [ObservableProperty] private SolidColorBrush _mongoStatusColor = Brushes.Gray;
 
+    // 📤 Send SMS properties
+    [ObservableProperty] private SimCard? _selectedSim;
+    [ObservableProperty] private string _smsDestNumber = "";
+    [ObservableProperty] private string _smsContent = "";
+    [ObservableProperty] private string _smsResult = "";
+    [ObservableProperty] private bool _isSending;
+
     public ObservableCollection<SimCard> SimList { get; } = new();
     public ObservableCollection<SmsMessage> MessageList { get; } = new();
     public ICollectionView FilteredMessages { get; private set; }
@@ -308,6 +315,69 @@ public partial class MainViewModel : ObservableObject
 
         StatusMessage = "🔄 Đang sync MongoDB...";
         await _simSyncService.SyncSimsToMongo();
+    }
+
+    /// <summary>📤 Gửi SMS thủ công qua SIM đã chọn.</summary>
+    [RelayCommand]
+    private async Task SendSmsAsync()
+    {
+        if (SelectedSim == null)
+        {
+            SmsResult = "⚠️ Chưa chọn SIM";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(SmsDestNumber))
+        {
+            SmsResult = "⚠️ Chưa nhập số đích";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(SmsContent))
+        {
+            SmsResult = "⚠️ Chưa nhập nội dung";
+            return;
+        }
+
+        IsSending = true;
+        SmsResult = $"📤 Đang gửi qua {SelectedSim.ComPort}...";
+        StatusMessage = $"📤 Gửi SMS → {SmsDestNumber} qua {SelectedSim.ComPort}";
+
+        try
+        {
+            var (success, message) = await _portManager.SendSmsViaPort(
+                SelectedSim.ComPort, SmsDestNumber, SmsContent);
+
+            SmsResult = message;
+            StatusMessage = message;
+            Logger.Info($"SMS Manual: {SelectedSim.ComPort} → {SmsDestNumber}: {(success ? "OK" : "FAIL")}");
+
+            if (success)
+            {
+                // Thêm vào message list
+                MessageList.Insert(0, new SmsMessage
+                {
+                    MessageId = $"MANUAL-{DateTime.Now.Ticks}",
+                    SourceAddr = SelectedSim.PhoneNumber ?? SelectedSim.ComPort,
+                    DestAddr = SmsDestNumber,
+                    Content = SmsContent,
+                    Direction = "OUT",
+                    Status = "SENT",
+                    CreatedAt = DateTime.Now,
+                });
+                UpdateMessageCounts();
+
+                // Clear content sau khi gửi thành công
+                SmsContent = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            SmsResult = $"❌ Lỗi: {ex.Message}";
+            Logger.Error($"SendSMS error: {ex.Message}");
+        }
+        finally
+        {
+            IsSending = false;
+        }
     }
 
     private async Task ConnectToServerAsync()

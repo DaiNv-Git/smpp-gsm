@@ -195,10 +195,12 @@ public class SerialPortManager : IDisposable
             // 5. Signal level
             var signal = helper.GetSignalLevel();
 
-            // 6. Provider — prefer AT+COPS?, fallback to IMSI prefix
-            provider ??= helper.QueryOperator();
-            if (provider == null || provider == "Unknown" || provider == "UNKNOWN")
-                provider = AtCommandHelper.DetectProvider(imsi);
+            // 6. Provider — IMSI prefix first (giống Java cũ), AT+COPS? là fallback
+            // Lý do: AT+COPS? trả về mạng đang kết nối (có thể roaming KDDI)
+            //        IMSI prefix trả về nhà mạng phát hành SIM (Docomo/Rakuten) → đúng hơn
+            provider ??= AtCommandHelper.DetectProvider(imsi);
+            if (provider == "Unknown")
+                provider = helper.QueryOperator() ?? "Unknown";
 
             return new SimCard
             {
@@ -312,6 +314,50 @@ public class SerialPortManager : IDisposable
         System.Diagnostics.Debug.WriteLine(
             $"📤 Dispatched {task.MessageId} to {bestWorker.Sim.ComPort} (queue={bestWorker.QueueSize})");
         return true;
+    }
+
+    /// <summary>
+    /// 📤 Gửi SMS thủ công qua 1 SIM cụ thể (theo COM port).
+    /// Ưu tiên dùng worker nếu đang chạy, nếu không thì mở port trực tiếp.
+    /// </summary>
+    public async Task<(bool success, string message)> SendSmsViaPort(string comPort, string destNumber, string content)
+    {
+        try
+        {
+            // 1. Thử gửi qua worker đang chạy (nhanh, không cần mở port mới)
+            if (_workers.TryGetValue(comPort, out var worker) && worker.IsRunning)
+            {
+                var task = new SmsTask
+                {
+                    MessageId = $"MANUAL-{DateTime.Now.Ticks}",
+                    DestAddr = destNumber,
+                    SourceAddr = _sims.TryGetValue(comPort, out var s) ? s.PhoneNumber ?? "" : "",
+                    Content = content,
+                };
+                worker.EnqueueSms(task);
+                return (true, $"✅ SMS đã đưa vào hàng đợi {comPort}");
+            }
+
+            // 2. Mở port trực tiếp và gửi
+            return await Task.Run(() =>
+            {
+                using var helper = new AtCommandHelper(comPort, _settings.BaudRate);
+                if (!helper.Open())
+                    return (false, $"❌ Không thể mở {comPort}");
+
+                if (!helper.IsAlive())
+                    return (false, $"❌ Modem {comPort} không phản hồi");
+
+                var ok = helper.SendSms(destNumber, content);
+                return ok
+                    ? (true, $"✅ SMS đã gửi thành công qua {comPort}")
+                    : (false, $"❌ Gửi SMS thất bại qua {comPort}");
+            });
+        }
+        catch (Exception ex)
+        {
+            return (false, $"❌ Lỗi: {ex.Message}");
+        }
     }
 
     public void StopAllWorkers()

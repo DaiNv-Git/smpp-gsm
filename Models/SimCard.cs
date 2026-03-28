@@ -57,6 +57,10 @@ public class SimCard
 
     public string DailyCountDisplay => $"{DailySentCount}/{DailyLimit}";
 
+    /// <summary>Display name cho dropdown: "COM67 | Rakuten Mobile (JP) | +817083290870"</summary>
+    public string SimDisplayName =>
+        $"{ComPort} | {Provider ?? "?"} | {PhoneNumber ?? "Chưa có số"}";
+
     public void RecordSuccess()
     {
         TotalSent++;

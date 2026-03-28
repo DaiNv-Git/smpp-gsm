@@ -188,17 +188,26 @@ public class AtCommandHelper : IDisposable
         {
             var resp = SendAndRead("AT+COPS?", 3000);
 
-            // Pattern 1: +COPS: 0,0,"Softbank",2
+            // Pattern 1: +COPS: 0,0,"Softbank",2  hoặc  +COPS: 0,2,"44011",7
             var m = Regex.Match(resp, @"\+COPS:\s*\d+,\d+,""([^""]+)""");
-            if (m.Success) return DecodeUcs2IfNeeded(m.Groups[1].Value);
+            if (m.Success)
+            {
+                var raw = DecodeUcs2IfNeeded(m.Groups[1].Value);
+                // 🔥 FIX: Nếu kết quả là MCC+MNC dạng số → map sang tên nhà mạng
+                if (Regex.IsMatch(raw, @"^\d{5,6}$"))
+                    return MapMccMnc(raw);
+                return raw;
+            }
 
             // Pattern 2: +COPS: "Softbank"
             m = Regex.Match(resp, @"\+COPS:\s*""([^""]+)""");
-            if (m.Success) return DecodeUcs2IfNeeded(m.Groups[1].Value);
-
-            // Pattern 3: Numeric MCC+MNC: +COPS: 0,2,"44020"
-            m = Regex.Match(resp, @"\+COPS:\s*\d+,\d+,""(\d{5,6})""");
-            if (m.Success) return MapMccMnc(m.Groups[1].Value);
+            if (m.Success)
+            {
+                var raw = DecodeUcs2IfNeeded(m.Groups[1].Value);
+                if (Regex.IsMatch(raw, @"^\d{5,6}$"))
+                    return MapMccMnc(raw);
+                return raw;
+            }
 
             // Try switching to alphanumeric format
             if (resp.Contains("+COPS:"))
@@ -207,7 +216,13 @@ public class AtCommandHelper : IDisposable
                 Thread.Sleep(200);
                 resp = SendAndRead("AT+COPS?", 3000);
                 m = Regex.Match(resp, @"\+COPS:\s*\d+,\d+,""([^""]+)""");
-                if (m.Success) return DecodeUcs2IfNeeded(m.Groups[1].Value);
+                if (m.Success)
+                {
+                    var raw = DecodeUcs2IfNeeded(m.Groups[1].Value);
+                    if (Regex.IsMatch(raw, @"^\d{5,6}$"))
+                        return MapMccMnc(raw);
+                    return raw;
+                }
             }
         }
         catch (Exception ex)
@@ -219,11 +234,11 @@ public class AtCommandHelper : IDisposable
 
     private static string MapMccMnc(string mccMnc) => mccMnc switch
     {
-        "44020" => "SoftBank",
-        "44010" => "NTT DoCoMo",
-        "44050" or "44051" or "44053" or "44054" => "KDDI/AU",
-        "44000" or "44001" or "44002" or "44003" => "Y!mobile",
-        "44011" => "Rakuten Mobile",
+        "44020" => "SoftBank (JP)",
+        "44010" => "NTT Docomo (JP)",
+        "44050" or "44051" or "44053" or "44054" => "KDDI/AU (JP)",
+        "44000" or "44001" or "44002" or "44003" => "Y!mobile (JP)",
+        "44011" => "Rakuten Mobile (JP)",
         _ => mccMnc,
     };
 
