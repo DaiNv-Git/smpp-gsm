@@ -548,7 +548,29 @@ public class AtCommandHelper : IDisposable
         var messages = new List<(int, string, string, DateTime)>();
         try
         {
-            var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
+            // Khi CSCS=UCS2, mọi chuỗi text trong ngoặc kép phải ở dạng UCS2 hex.
+            // "REC UNREAD" -> "00520045004300200055004E0052004500410044"
+            string unreadHex = EncodeUcs2("REC UNREAD");
+            var resp = SendAndRead($"AT+CMGL=\"{unreadHex}\"", timeoutMs);
+            
+            if (resp.Contains("ERROR") || string.IsNullOrWhiteSpace(resp))
+            {
+                // Fallback 1: Thử integer '0' (0 = REC UNREAD trong PDU mode nhưng nhiều modem text mode hỗ trợ)
+                resp = SendAndRead("AT+CMGL=0", timeoutMs);
+            }
+
+            if (resp.Contains("ERROR") || (string.IsNullOrWhiteSpace(resp) && !resp.Contains("+CMGL")))
+            {
+                // Fallback 2: Thử đọc "ALL" bằng UCS2 hex ("ALL" -> 0041004C004C) 
+                resp = SendAndRead($"AT+CMGL=\"{EncodeUcs2("ALL")}\"", timeoutMs);
+            }
+
+            if (resp.Contains("ERROR") || (string.IsNullOrWhiteSpace(resp) && !resp.Contains("+CMGL")))
+            {
+                // Fallback 3: Thử đọc "ALL" bằng ASCII thường (nhiều modem bỏ qua CSCS cho chữ ALL)
+                resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
+            }
+
             ParseCmglResponse(resp, messages);
         }
         catch (Exception ex)
@@ -579,10 +601,12 @@ public class AtCommandHelper : IDisposable
 
             if (int.TryParse(indexMatch.Groups[1].Value, out var index))
             {
-                string sender = DecodeUcs2IfNeeded(quotedFields.ElementAtOrDefault(1) ?? quotedFields[0]);
+                string sender = quotedFields.ElementAtOrDefault(1) ?? (quotedFields.Count > 0 ? quotedFields[0] : "");
                 string timestamp = quotedFields.LastOrDefault(f =>
                     Regex.IsMatch(f, @"^\d{2,4}/\d{2}/\d{2},\d{2}:\d{2}:\d{2}(?:[+-]\d{2})?$")) ?? "";
+                
                 string content = lines[i + 1].Trim();
+                // Content không nằm trong ngoặc kép theo format CMGL, nên phải tự decode riêng phần này
                 string decodedContent = DecodeUcs2IfNeeded(content);
 
                 var time = ParseSmsTimestamp(timestamp);
@@ -598,7 +622,10 @@ public class AtCommandHelper : IDisposable
         foreach (Match match in Regex.Matches(line, @"""([^""]*)"""))
         {
             if (match.Groups.Count > 1)
-                fields.Add(match.Groups[1].Value);
+            {
+                // Decode ngay lập tức vì khi CSCS=UCS2, modem có thể trả về MỌI field (kể cả timestamp) dạng UCS2 hex
+                fields.Add(DecodeUcs2IfNeeded(match.Groups[1].Value));
+            }
         }
         return fields;
     }
