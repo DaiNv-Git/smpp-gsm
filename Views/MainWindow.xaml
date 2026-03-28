@@ -483,12 +483,18 @@
                                 Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,5"/>
                             <ComboBox ItemsSource="{Binding SimList}"
                                 SelectedItem="{Binding SelectedSim}"
-                                DisplayMemberPath="SimDisplayName"
                                 Background="{StaticResource BgCardBrush}"
                                 Foreground="{StaticResource TextPrimaryBrush}"
                                 BorderBrush="{StaticResource BorderSubtleBrush}"
                                 BorderThickness="1" Padding="10,8" FontSize="12"
-                                Margin="0,0,0,14"/>
+                                Margin="0,0,0,14">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding SimDisplayName}"
+                                            Foreground="#f0f6fc"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
 
                             <!-- Số đích -->
                             <TextBlock Text="Số điện thoại đích" FontSize="11"

@@ -338,23 +338,24 @@ public partial class MainViewModel : ObservableObject
         }
 
         IsSending = true;
-        SmsResult = $"📤 Đang gửi qua {SelectedSim.ComPort}...";
-        StatusMessage = $"📤 Gửi SMS → {SmsDestNumber} qua {SelectedSim.ComPort}";
+        var sim = SelectedSim; // Capture trước await (SelectedSim có thể bị null do SimList update async)
+        SmsResult = $"📤 Đang gửi qua {sim.ComPort}...";
+        StatusMessage = $"📤 Gửi SMS → {SmsDestNumber} qua {sim.ComPort}";
 
         try
         {
             var (success, message) = await _portManager.SendSmsViaPort(
-                SelectedSim.ComPort, SmsDestNumber, SmsContent);
+                sim.ComPort, SmsDestNumber, SmsContent);
 
             SmsResult = message;
             StatusMessage = message;
-            Logger.Info($"SMS Manual: {SelectedSim.ComPort} → {SmsDestNumber}: {(success ? "OK" : "FAIL")}");
+            Logger.Info($"SMS Manual: {sim.ComPort} → {SmsDestNumber}: {(success ? "OK" : "FAIL")}");
 
             // Thêm vào message list (cả thành công lẫn thất bại)
             MessageList.Insert(0, new SmsMessage
             {
                 MessageId = $"MANUAL-{DateTime.Now.Ticks}",
-                SourceAddr = SelectedSim.PhoneNumber ?? SelectedSim.ComPort,
+                SourceAddr = sim.PhoneNumber ?? sim.ComPort,
                 DestAddr = SmsDestNumber,
                 Content = SmsContent,
                 Direction = "OUT",
