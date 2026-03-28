@@ -117,25 +117,14 @@ public class ModemWorker : IDisposable
                 }
                 else
                 {
-                    // Simulated URC: poll SMS count every 2s
-                    if ((DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= 2000)
+                    // 🔥 FIX: Periodic scan mỗi 5s (thay vì count-based detection bị lỗi storage mismatch)
+                    // Count-based bị lỗi vì ReadIncomingSms set storage sang SM,
+                    // nhưng tin nhắn đến lưu vào ME → count SM không tăng → không phát hiện.
+                    // Duplicate cache (_processedSmsCache) đảm bảo không xử lý trùng.
+                    if ((DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= 5000)
                     {
                         _lastSmsCountCheck = DateTime.Now;
-                        var currentCount = _helper.GetSmsCount();
-                        if (currentCount >= 0)
-                        {
-                            if (_lastSmsCount == -1)
-                            {
-                                _lastSmsCount = currentCount; // Initialize
-                            }
-                            else if (currentCount > _lastSmsCount)
-                            {
-                                System.Diagnostics.Debug.WriteLine(
-                                    $"📨 [{_sim.ComPort}] Simulated URC: {currentCount - _lastSmsCount} new SMS (count: {_lastSmsCount}→{currentCount})");
-                                hasNewSms = true;
-                            }
-                            _lastSmsCount = currentCount;
-                        }
+                        hasNewSms = true;
                     }
                 }
 
@@ -319,6 +308,10 @@ public class ModemWorker : IDisposable
             }
 
             var allMessages = new List<(int index, string sender, string content, DateTime time)>();
+
+            // 🔥 Set text mode + UCS2 charset 1 lần duy nhất trước khi scan
+            // (tránh gọi AT+CMGF=1 + AT+CSCS="UCS2" x4 mỗi scan cycle)
+            _helper.PrepareForRead();
 
             // 🔥 Dual storage scan: ME + SM (giống Java)
             foreach (var storage in new[] { "ME", "SM" })

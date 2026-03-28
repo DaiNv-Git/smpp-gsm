@@ -54,6 +54,9 @@ public class AtCommandHelper : IDisposable
         try { if (_port.IsOpen) _port.Close(); } catch { }
     }
 
+    // 🔥 Flag lưu URC phát hiện trong buffer trước khi DiscardInBuffer
+    private volatile bool _pendingUrc;
+
     /// <summary>Gửi AT command và đọc response.</summary>
     public string SendAndRead(string command, int timeoutMs = 2000)
     {
@@ -62,10 +65,24 @@ public class AtCommandHelper : IDisposable
             if (!_port.IsOpen) return "";
             try
             {
-                _port.DiscardInBuffer();
+                // 🔥 Đọc buffer trước khi discard — tìm URC (+CMTI/+CMT)
+                if (_port.BytesToRead > 0)
+                {
+                    var pending = _port.ReadExisting();
+                    if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
+                    {
+                        _pendingUrc = true;
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📨 [{_port.PortName}] URC saved from buffer before AT command: {command}");
+                    }
+                }
+                else
+                {
+                    _port.DiscardInBuffer();
+                }
                 _port.DiscardOutBuffer();
                 _port.Write(command + "\r");
-                Thread.Sleep(100); // Cho modem đủ thời gian xử lý (10ms quá nhanh cho USB serial)
+                Thread.Sleep(100); // Cho modem đủ thời gian xử lý
 
                 var sb = new StringBuilder();
                 var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
@@ -75,7 +92,11 @@ public class AtCommandHelper : IDisposable
                     if (_port.BytesToRead > 0)
                     {
                         sb.Append(_port.ReadExisting());
-                        if (sb.ToString().Contains("OK") || sb.ToString().Contains("ERROR"))
+                        var resp = sb.ToString();
+                        // Check URC trong response (modem có thể gửi URC xen giữa)
+                        if (resp.Contains("+CMTI:") || resp.Contains("+CMT:"))
+                            _pendingUrc = true;
+                        if (resp.Contains("OK") || resp.Contains("ERROR"))
                             break;
                     }
                     Thread.Sleep(30);
@@ -323,7 +344,17 @@ public class AtCommandHelper : IDisposable
                     $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
 
                 // CMGS — 🔥 FIX #2: Đợi prompt > bằng loop có timeout (không fix cứng 1s)
-                _port.DiscardInBuffer();
+                // Đọc buffer trước, check URC trước khi discard
+                if (_port.BytesToRead > 0)
+                {
+                    var pending = _port.ReadExisting();
+                    if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
+                        _pendingUrc = true;
+                }
+                else
+                {
+                    _port.DiscardInBuffer();
+                }
                 _port.Write($"AT+CMGS=\"{normalizedDest}\"\r");
 
                 var promptDeadline = DateTime.Now.AddMilliseconds(5000);
@@ -477,9 +508,15 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
-    /// <summary>Check URC buffer for +CMTI (new SMS).</summary>
+    /// <summary>Check URC buffer for +CMTI (new SMS) + pending URC từ SendAndRead.</summary>
     public bool CheckForNewSms()
     {
+        // 🔥 Check URC đã phát hiện trong SendAndRead (buffer trước khi discard)
+        if (_pendingUrc)
+        {
+            _pendingUrc = false;
+            return true;
+        }
         if (!_port.IsOpen || _port.BytesToRead == 0) return false;
         try
         {
@@ -517,14 +554,23 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
+    /// <summary>Set text mode + UCS2 1 lần — gọi trước khi ListUnreadSms/ListAllSms.</summary>
+    public void PrepareForRead()
+    {
+        try
+        {
+            SendAndRead("AT+CMGF=1", 500);
+            SendAndRead("AT+CSCS=\"UCS2\"", 500);
+        }
+        catch { }
+    }
+
     /// <summary>Đọc SMS UNREAD only — nhanh hơn ALL (giống Java: listUnreadSmsText).</summary>
     public List<(int index, string sender, string content, DateTime time)> ListUnreadSms(int timeoutMs = 5000)
     {
         var messages = new List<(int, string, string, DateTime)>();
         try
         {
-            SendAndRead("AT+CMGF=1", 500);
-            SendAndRead("AT+CSCS=\"UCS2\"", 500);
             var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
             ParseCmglResponse(resp, messages);
         }
@@ -541,8 +587,6 @@ public class AtCommandHelper : IDisposable
         var messages = new List<(int, string, string, DateTime)>();
         try
         {
-            SendAndRead("AT+CMGF=1", 500);
-            SendAndRead("AT+CSCS=\"UCS2\"", 500);
             var resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
             ParseCmglResponse(resp, messages);
         }

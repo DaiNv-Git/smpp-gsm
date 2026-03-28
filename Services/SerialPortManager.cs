@@ -346,8 +346,12 @@ public class SerialPortManager : IDisposable
                 };
                 worker.EnqueueSms(task);
 
-                // Đợi worker gửi xong (timeout 60s)
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(60000));
+                // Đợi worker gửi xong (timeout 60s, cancel timer khi hoàn thành)
+                using var timeoutCts = new CancellationTokenSource();
+                var timeoutTask = Task.Delay(60000, timeoutCts.Token);
+                var completed = await Task.WhenAny(tcs.Task, timeoutTask);
+                timeoutCts.Cancel(); // Cancel timer nếu tcs hoàn thành trước
+
                 if (completed == tcs.Task)
                 {
                     var ok = await tcs.Task;
