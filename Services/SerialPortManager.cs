@@ -27,6 +27,10 @@ public class SerialPortManager : IDisposable
     public event Action<string, string, DateTime>? IncomingSms; // sender, content, time
     public event Action<string, string, bool, string?>? SmsResult; // messageId, status, success, error
 
+    // 📤 SMS Forwarder — queue xử lý tuần tự (shared across all workers)
+    private readonly SmsForwarderService _forwarder = new();
+    public SmsForwarderService Forwarder => _forwarder;
+
     public SerialPortManager(AppSettings settings)
     {
         _settings = settings;
@@ -278,6 +282,10 @@ public class SerialPortManager : IDisposable
             onIncomingSms: (comPort, sender, content, time) =>
             {
                 IncomingSms?.Invoke(sender, content, time);
+
+                // 📤 Enqueue SMS để forward lên API (xử lý tuần tự, có retry)
+                var receiver = sim.PhoneNumber ?? comPort;
+                _forwarder.Enqueue(sender, receiver, content, comPort);
             }
         );
 
@@ -372,5 +380,6 @@ public class SerialPortManager : IDisposable
     public void Dispose()
     {
         StopAllWorkers();
+        _forwarder.Dispose();
     }
 }
