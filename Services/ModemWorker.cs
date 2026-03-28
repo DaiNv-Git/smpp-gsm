@@ -376,8 +376,9 @@ public class ModemWorker : IDisposable
 
             foreach (var (storage, index, sender, content, time) in allMessages)
             {
-                // 🔥 TTL-based duplicate check (giống Java: processedSmsCache)
-                var hash = $"{sender}|{content}|{time:yyyyMMddHHmmss}";
+                // Dùng storage + index + payload để nhận diện ổn định cùng một SMS
+                // ngay cả khi modem trả timestamp không parse được.
+                var hash = $"{storage}|{index}|{sender}|{content}";
                 if (_processedSmsCache.ContainsKey(hash))
                 {
                     if (EnsureStorage(storage))

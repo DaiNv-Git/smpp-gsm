@@ -16,6 +16,7 @@ public partial class MainViewModel : ObservableObject
     private ServerConnection? _serverConnection;
     private MongoDbService? _mongoDb;
     private SimSyncService? _simSyncService;
+    private CancellationTokenSource? _notificationCts;
 
     [ObservableProperty] private string _serverStatus = "Chưa kết nối";
     [ObservableProperty] private SolidColorBrush _serverStatusColor = Brushes.Gray;
@@ -32,6 +33,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _failedCount;
     [ObservableProperty] private string _mongoStatus = "Chưa kết nối";
     [ObservableProperty] private SolidColorBrush _mongoStatusColor = Brushes.Gray;
+    [ObservableProperty] private bool _isNotificationVisible;
+    [ObservableProperty] private string _notificationTitle = "";
+    [ObservableProperty] private string _notificationMessage = "";
 
     // 📤 Send SMS properties
     [ObservableProperty] private SimCard? _selectedSim;
@@ -235,11 +239,34 @@ public partial class MainViewModel : ObservableObject
 
     private void ShowNotification(string title, string message)
     {
-        try
+        _notificationCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _notificationCts = cts;
+
+        NotificationTitle = title;
+        NotificationMessage = message;
+        IsNotificationVisible = true;
+
+        _ = Task.Run(async () =>
         {
-            System.Media.SystemSounds.Asterisk.Play();
-        }
-        catch { }
+            try
+            {
+                await Task.Delay(5000, cts.Token);
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    if (_notificationCts == cts)
+                        IsNotificationVisible = false;
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                if (_notificationCts == cts)
+                    _notificationCts = null;
+            }
+        });
     }
 
     [RelayCommand]
@@ -499,6 +526,8 @@ public partial class MainViewModel : ObservableObject
 
         _simSyncService?.Dispose();
         _serverConnection?.Dispose();
+        _notificationCts?.Cancel();
+        _notificationCts?.Dispose();
         _portManager.Dispose();
     }
 }
