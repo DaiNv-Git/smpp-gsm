@@ -613,14 +613,19 @@ public class AtCommandHelper : IDisposable
             if (!line.StartsWith("+CMGL:"))
                 continue;
 
-            var headerMatch = Regex.Match(
-                line,
-                @"\+CMGL:\s*(\d+),""[^""]*"",""([^""]*)""(?:,""[^""]*"")?(?:,""([^""]*)"")?");
-            if (headerMatch.Success && i + 1 < lines.Length)
+            var indexMatch = Regex.Match(line, @"\+CMGL:\s*(\d+)");
+            if (!indexMatch.Success || i + 1 >= lines.Length)
+                continue;
+
+            var quotedFields = ExtractQuotedFields(line);
+            if (quotedFields.Count == 0)
+                continue;
+
+            if (int.TryParse(indexMatch.Groups[1].Value, out var index))
             {
-                int index = int.Parse(headerMatch.Groups[1].Value);
-                string sender = DecodeUcs2IfNeeded(headerMatch.Groups[2].Value);
-                string timestamp = headerMatch.Groups[3].Success ? headerMatch.Groups[3].Value : "";
+                string sender = DecodeUcs2IfNeeded(quotedFields.ElementAtOrDefault(1) ?? quotedFields[0]);
+                string timestamp = quotedFields.LastOrDefault(f =>
+                    Regex.IsMatch(f, @"^\d{2,4}/\d{2}/\d{2},\d{2}:\d{2}:\d{2}(?:[+-]\d{2})?$")) ?? "";
                 string content = lines[i + 1].Trim();
                 string decodedContent = DecodeUcs2IfNeeded(content);
 
@@ -629,6 +634,17 @@ public class AtCommandHelper : IDisposable
                     messages.Add((index, sender, decodedContent, time));
             }
         }
+    }
+
+    private static List<string> ExtractQuotedFields(string line)
+    {
+        var fields = new List<string>();
+        foreach (Match match in Regex.Matches(line, @"""([^""]*)"""))
+        {
+            if (match.Groups.Count > 1)
+                fields.Add(match.Groups[1].Value);
+        }
+        return fields;
     }
 
     /// <summary>Xóa tất cả SMS đã đọc trong storage hiện tại (giống Java: AT+CMGD=1,3).</summary>

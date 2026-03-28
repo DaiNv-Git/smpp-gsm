@@ -10,6 +10,7 @@ namespace GsmAgent.Services;
 /// </summary>
 public class ModemWorker : IDisposable
 {
+    private const int SmsScanIntervalMs = 2000;
     private readonly AtCommandHelper _helper;
     private readonly BlockingCollection<SmsTask> _queue = new(100);
     private readonly CancellationTokenSource _cts = new();
@@ -110,30 +111,15 @@ public class ModemWorker : IDisposable
             {
                 bool hasNewSms = false;
 
+                // Ưu tiên URC khi modem có phát, nhưng luôn giữ periodic scan làm đường an toàn.
                 if (_urcSupported)
-                {
-                    // URC mode: check buffer for +CMTI/+CMT
                     hasNewSms = _helper.CheckForNewSms();
 
-                    // Một số modem trả lời CNMI được nhưng không thực sự bắn URC ổn định.
-                    // Giữ polling định kỳ làm fallback để không bỏ sót SMS mới.
-                    if (!hasNewSms && (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= 5000)
-                    {
-                        _lastSmsCountCheck = DateTime.Now;
-                        hasNewSms = true;
-                    }
-                }
-                else
+                if (!hasNewSms &&
+                    (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= SmsScanIntervalMs)
                 {
-                    // 🔥 FIX: Periodic scan mỗi 5s (thay vì count-based detection bị lỗi storage mismatch)
-                    // Count-based bị lỗi vì ReadIncomingSms set storage sang SM,
-                    // nhưng tin nhắn đến lưu vào ME → count SM không tăng → không phát hiện.
-                    // Duplicate cache (_processedSmsCache) đảm bảo không xử lý trùng.
-                    if ((DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= 5000)
-                    {
-                        _lastSmsCountCheck = DateTime.Now;
-                        hasNewSms = true;
-                    }
+                    _lastSmsCountCheck = DateTime.Now;
+                    hasNewSms = true;
                 }
 
                 if (hasNewSms)
