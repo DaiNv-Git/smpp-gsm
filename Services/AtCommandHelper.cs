@@ -315,33 +315,23 @@ public class AtCommandHelper : IDisposable
             {
                 if (!_port.IsOpen) return false;
 
-                // Set text mode
-                SendAndRead("AT+CMGF=1", 500);
-
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
-
-                string actualContent;
-                // 🔥 FIX #1: Số đích LUÔN dùng format chuẩn quốc tế (giữ dấu +, KHÔNG encode UCS2)
-                // AT+CMGS nhận số dạng text thường, UCS2 encoding chỉ áp dụng cho NỘI DUNG SMS
                 string normalizedDest = NormalizeNumber(destNumber);
 
+                // 🔥 FIX: LUÔN dùng GSM charset cho AT command interface
+                // → số điện thoại trong AT+CMGS giữ plain text
+                // → DCS=8 trong AT+CSMP báo modem content body là UCS2
+                SendAndRead("AT+CMGF=1", 500);
+                SendAndRead("AT+CSCS=\"GSM\"", 500);
+
                 if (isUnicode)
-                {
-                    SendAndRead("AT+CSCS=\"UCS2\"", 500);
-                    SendAndRead("AT+CSMP=17,167,0,8", 500);
-                    actualContent = EncodeUcs2(content);
-                }
+                    SendAndRead("AT+CSMP=17,167,0,8", 500);  // DCS=8 → UCS2 content
                 else
-                {
-                    SendAndRead("AT+CSCS=\"IRA\"", 500);
-                    SendAndRead("AT+CSMP=17,167,0,0", 500);
-                    actualContent = content;
-                }
+                    SendAndRead("AT+CSMP=17,167,0,0", 500);  // DCS=0 → GSM 7bit
 
                 System.Diagnostics.Debug.WriteLine(
                     $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
 
-                // CMGS — 🔥 FIX #2: Đợi prompt > bằng loop có timeout (không fix cứng 1s)
                 // Đọc buffer trước, check URC trước khi discard
                 if (_port.BytesToRead > 0)
                 {
@@ -352,6 +342,7 @@ public class AtCommandHelper : IDisposable
                 _port.DiscardInBuffer();
                 _port.Write($"AT+CMGS=\"{normalizedDest}\"\r");
 
+                // Đợi prompt > với timeout
                 var promptDeadline = DateTime.Now.AddMilliseconds(5000);
                 var promptSb = new StringBuilder();
                 bool gotPrompt = false;
@@ -369,7 +360,7 @@ public class AtCommandHelper : IDisposable
                         if (promptStr.Contains("ERROR"))
                         {
                             System.Diagnostics.Debug.WriteLine(
-                                $"❌ SendSms: AT+CMGS returned ERROR: {promptStr}");
+                                $"❌ SendSms: AT+CMGS ERROR: {promptStr}");
                             return false;
                         }
                     }
@@ -380,11 +371,12 @@ public class AtCommandHelper : IDisposable
                 {
                     System.Diagnostics.Debug.WriteLine(
                         $"❌ SendSms: No '>' prompt after 5s (got: {promptSb})");
-                    try { _port.Write(new byte[] { 0x1B }, 0, 1); } catch { } // ESC để cancel
+                    try { _port.Write(new byte[] { 0x1B }, 0, 1); } catch { }
                     return false;
                 }
 
-                // Send content + Ctrl+Z
+                // Gửi content (UCS2 hex nếu unicode, plain text nếu ASCII)
+                string actualContent = isUnicode ? EncodeUcs2(content) : content;
                 _port.Write(actualContent);
                 Thread.Sleep(300);
                 _port.Write(new byte[] { 0x1A }, 0, 1); // Ctrl+Z
@@ -403,19 +395,23 @@ public class AtCommandHelper : IDisposable
                             gotCmgs = true;
 
                         if (result.Contains("OK"))
+                        {
+                            System.Diagnostics.Debug.WriteLine($"✅ SendSms OK to {normalizedDest}");
                             return true;
+                        }
                         if (result.Contains("ERROR"))
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"❌ SendSms ERROR: {result.Replace("\r", " ").Replace("\n", " ")}");
                             return false;
+                        }
                     }
                     Thread.Sleep(100);
                 }
 
                 var finalResult = sb.ToString();
-                if (gotCmgs && !finalResult.Contains("ERROR"))
-                {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"⚠️ SendSms: got +CMGS but no final OK before timeout: {finalResult}");
-                }
+                System.Diagnostics.Debug.WriteLine(
+                    $"⚠️ SendSms timeout (gotCmgs={gotCmgs}): {finalResult.Replace("\r", " ").Replace("\n", " ")}");
 
                 return false;
             }
@@ -523,18 +519,21 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
-    /// <summary>Set text mode + UCS2 1 lần — gọi trước khi ListUnreadSms/ListAllSms.</summary>
+    /// <summary>Set text mode — gọi trước khi ListUnreadSms.</summary>
     public void PrepareForRead()
     {
         try
         {
             SendAndRead("AT+CMGF=1", 500);
-            SendAndRead("AT+CSCS=\"UCS2\"", 500);
+            // 🔥 FIX: Dùng GSM charset cho AT+CMGL command
+            // Vì "REC UNREAD" là text ASCII, modem cần GSM/IRA charset để hiểu
+            // Content SMS sẽ trả về dạng UCS2 hex tự động nếu modem lưu UCS2
+            SendAndRead("AT+CSCS=\"GSM\"", 500);
         }
         catch { }
     }
 
-    /// <summary>Đọc SMS UNREAD only — nhanh hơn ALL (giống Java: listUnreadSmsText).</summary>
+    /// <summary>Đọc SMS UNREAD only (giống Java: listUnreadSmsText).</summary>
     public List<(int index, string sender, string content, DateTime time)> ListUnreadSms(int timeoutMs = 5000)
     {
         var messages = new List<(int, string, string, DateTime)>();
