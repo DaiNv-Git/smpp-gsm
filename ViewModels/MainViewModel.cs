@@ -254,6 +254,7 @@ public partial class MainViewModel : ObservableObject
         try
         {
             await _portManager.ScanAllAsync();
+            ScanStatus = _portManager.LastScanStats;
             StatusMessage = $"Scan hoàn tất: {SimList.Count} SIM(s)";
 
             // 🔗 Sync ngay vào MongoDB sau khi scan thủ công

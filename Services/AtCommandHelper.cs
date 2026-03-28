@@ -65,24 +65,20 @@ public class AtCommandHelper : IDisposable
             if (!_port.IsOpen) return "";
             try
             {
-                // 🔥 Đọc buffer trước khi discard — tìm URC (+CMTI/+CMT)
+                // 🔥 Check URC trong buffer TRƯỚC khi discard
                 if (_port.BytesToRead > 0)
                 {
                     var pending = _port.ReadExisting();
                     if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
                     {
                         _pendingUrc = true;
-                        System.Diagnostics.Debug.WriteLine(
-                            $"📨 [{_port.PortName}] URC saved from buffer before AT command: {command}");
                     }
                 }
-                else
-                {
-                    _port.DiscardInBuffer();
-                }
+                // LUÔN discard để đảm bảo buffer sạch cho command mới
+                _port.DiscardInBuffer();
                 _port.DiscardOutBuffer();
                 _port.Write(command + "\r");
-                Thread.Sleep(100); // Cho modem đủ thời gian xử lý
+                Thread.Sleep(100);
 
                 var sb = new StringBuilder();
                 var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
@@ -93,7 +89,6 @@ public class AtCommandHelper : IDisposable
                     {
                         sb.Append(_port.ReadExisting());
                         var resp = sb.ToString();
-                        // Check URC trong response (modem có thể gửi URC xen giữa)
                         if (resp.Contains("+CMTI:") || resp.Contains("+CMT:"))
                             _pendingUrc = true;
                         if (resp.Contains("OK") || resp.Contains("ERROR"))
@@ -351,10 +346,7 @@ public class AtCommandHelper : IDisposable
                     if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
                         _pendingUrc = true;
                 }
-                else
-                {
-                    _port.DiscardInBuffer();
-                }
+                _port.DiscardInBuffer();
                 _port.Write($"AT+CMGS=\"{normalizedDest}\"\r");
 
                 var promptDeadline = DateTime.Now.AddMilliseconds(5000);

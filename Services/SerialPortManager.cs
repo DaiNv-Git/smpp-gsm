@@ -20,6 +20,7 @@ public class SerialPortManager : IDisposable
     public IReadOnlyDictionary<string, SimCard> Sims => _sims;
     public IReadOnlyDictionary<string, ModemWorker> Workers => _workers;
     public bool IsScanning => _scanning;
+    public string LastScanStats { get; private set; } = "";
 
     public event Action<SimCard>? SimUpdated;
     public event Action<SimCard>? SimScanned; // 🆕 Fired immediately when each SIM is scanned (realtime)
@@ -64,6 +65,7 @@ public class SerialPortManager : IDisposable
 
             var newSims = new ConcurrentBag<SimCard>();
             var failedPorts = new ConcurrentBag<string>();
+            int pass1Ok = 0;
 
             // Pass 1: Scan parallel — fire SimScanned immediately for realtime UI
             var tasks = portNames.Select(port => Task.Run(() =>
@@ -72,6 +74,7 @@ public class SerialPortManager : IDisposable
                 if (sim != null)
                 {
                     newSims.Add(sim);
+                    Interlocked.Increment(ref pass1Ok);
                     // 🔥 Progressive loading: push SIM to UI immediately
                     SimScanned?.Invoke(sim);
                     System.Diagnostics.Debug.WriteLine(
@@ -86,6 +89,7 @@ public class SerialPortManager : IDisposable
             await Task.WhenAll(tasks);
 
             // Pass 2: Retry failed ports (like old Java system)
+            int retryOk = 0;
             if (failedPorts.Count > 0)
             {
                 System.Diagnostics.Debug.WriteLine(
@@ -98,6 +102,7 @@ public class SerialPortManager : IDisposable
                     if (sim != null)
                     {
                         newSims.Add(sim);
+                        Interlocked.Increment(ref retryOk);
                         // 🔥 Progressive: push retry results to UI too
                         SimScanned?.Invoke(sim);
                         System.Diagnostics.Debug.WriteLine(
@@ -113,8 +118,15 @@ public class SerialPortManager : IDisposable
             foreach (var sim in newSims)
                 _sims[sim.ComPort] = sim;
 
+            // 📊 Scan statistics
+            int totalPorts = portNames.Length;
+            int totalOk = pass1Ok + retryOk;
+            int totalFail = totalPorts - totalOk;
+            int phoneFound = newSims.Count(s => !string.IsNullOrWhiteSpace(s.PhoneNumber));
+
+            LastScanStats = $"📊 {totalPorts} cổng COM | ✅ {totalOk} thành công | ❌ {totalFail} thất bại | 📱 {phoneFound} có số ĐT";
             System.Diagnostics.Debug.WriteLine(
-                $"✅ Scan hoàn tất: {_sims.Count} SIM(s) phát hiện (pass1={newSims.Count - failedPorts.Count}, retry={failedPorts.Count})");
+                $"✅ Scan hoàn tất: {LastScanStats} (pass1={pass1Ok}, retry={retryOk})");
 
             var result = _sims.Values.ToList();
             ScanCompleted?.Invoke(result);
