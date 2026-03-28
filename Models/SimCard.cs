@@ -61,6 +61,8 @@ public class SimCard
     public string SimDisplayName =>
         $"{ComPort} | {Provider ?? "?"} | {PhoneNumber ?? "Chưa có số"}";
 
+    public override string ToString() => SimDisplayName;
+
     public void RecordSuccess()
     {
         TotalSent++;

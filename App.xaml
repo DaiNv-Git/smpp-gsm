@@ -120,11 +120,10 @@
             </ControlTemplate.Triggers>
         </ControlTemplate>
 
-        <Style x:Key="DarkComboBoxStyle" TargetType="ComboBox">
+        <Style TargetType="ComboBox">
             <Setter Property="Foreground" Value="#f0f6fc"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Height" Value="36"/>
-            <Setter Property="ItemContainerStyle" Value="{DynamicResource DarkComboBoxItemStyle}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBox">
@@ -167,7 +166,7 @@
             </Setter>
         </Style>
 
-        <Style x:Key="DarkComboBoxItemStyle" TargetType="ComboBoxItem">
+        <Style TargetType="ComboBoxItem">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="#f0f6fc"/>
             <Setter Property="Padding" Value="10,7"/>
