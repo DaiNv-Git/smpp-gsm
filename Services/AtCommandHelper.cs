@@ -529,16 +529,15 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
-    /// <summary>Set text mode — gọi trước khi ListUnreadSms.</summary>
+    /// <summary>Set text mode + UCS2 charset — gọi trước khi ListUnreadSms.
+    /// UCS2 charset để modem trả content tiếng Nhật/Trung/Việt dạng hex (decode được).
+    /// AT command keywords như "REC UNREAD" không bị ảnh hưởng bởi CSCS.</summary>
     public void PrepareForRead()
     {
         try
         {
             SendAndRead("AT+CMGF=1", 500);
-            // 🔥 FIX: Dùng GSM charset cho AT+CMGL command
-            // Vì "REC UNREAD" là text ASCII, modem cần GSM/IRA charset để hiểu
-            // Content SMS sẽ trả về dạng UCS2 hex tự động nếu modem lưu UCS2
-            SendAndRead("AT+CSCS=\"GSM\"", 500);
+            SendAndRead("AT+CSCS=\"UCS2\"", 500);
         }
         catch { }
     }
