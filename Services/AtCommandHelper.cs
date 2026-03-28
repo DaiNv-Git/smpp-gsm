@@ -606,11 +606,17 @@ public class AtCommandHelper : IDisposable
 
     // ==================== Utilities ====================
 
-    /// <summary>Chuẩn hóa số điện thoại — hỗ trợ cả 3 format: +81xxx, 81xxx, 0xxx.
-    /// Không tự chuyển đổi giữa các format — giữ nguyên số người dùng nhập.</summary>
+    /// <summary>Chuẩn hóa số điện thoại — hỗ trợ cả 3 format:
+    /// +81xxx → giữ nguyên (quốc tế)
+    /// 81xxx  → thêm + thành +81xxx (quốc tế, thiếu dấu +)
+    /// 0xxx   → giữ nguyên (local Nhật)
+    /// </summary>
     public static string NormalizeNumber(string phone)
     {
         phone = phone.Trim().Replace(" ", "").Replace("-", "");
+        // 81xxx (country code Nhật, thiếu +) → thêm + để modem hiểu đúng international
+        if (phone.StartsWith("81") && !phone.StartsWith("+") && phone.Length >= 11)
+            phone = "+" + phone;
         return phone;
     }
 

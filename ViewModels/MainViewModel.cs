@@ -454,7 +454,9 @@ public partial class MainViewModel : ObservableObject
     {
         OnlineSimCount = SimList.Count(s => s.Status == SimStatus.Online || s.Status == SimStatus.Busy);
         TotalQueueSize = SimList.Sum(s => s.QueueSize);
-        TotalSentCount = SimList.Sum(s => s.TotalSent);
+        // 🔥 FIX: Đếm từ MessageList (chính xác) — bao gồm cả SMS manual + worker
+        TotalSentCount = MessageList.Count(m =>
+            m.Direction == "OUT" && (m.Status == "SENT" || m.Status == "DELIVERED"));
         RateLimitedCount = SimList.Count(s => s.IsRateLimited);
         UpdateMessageCounts();
     }
