@@ -18,7 +18,7 @@ public class ModemWorker : IDisposable
     private readonly Action<string, string, bool, string?> _onSmsResult;
     private readonly Action<SimCard> _onSimUpdated;
     private readonly Action<SmsTask>? _onRetryNeeded; // retry on different SIM
-    private readonly Action<string, string, string, DateTime>? _onIncomingSms; // comPort, sender, content, time
+    private readonly Func<string, string, string, DateTime, bool>? _onIncomingSms; // comPort, sender, content, time
     private readonly int _cooldownMs;
     private readonly int _maxRetries;
     private bool _disposed;
@@ -34,7 +34,7 @@ public class ModemWorker : IDisposable
         Action<string, string, bool, string?>? onSmsResult = null,
         Action<SimCard>? onSimUpdated = null,
         Action<SmsTask>? onRetryNeeded = null,
-        Action<string, string, string, DateTime>? onIncomingSms = null)
+        Func<string, string, string, DateTime, bool>? onIncomingSms = null)
     {
         _sim = sim;
         _cooldownMs = cooldownMs;
@@ -185,8 +185,12 @@ public class ModemWorker : IDisposable
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"⛔ [{_sim.ComPort}] SIM đạt giới hạn {_sim.DailyLimit} SMS/ngày — skip");
-                task.CompletionSource?.TrySetResult(false);
-                _onRetryNeeded?.Invoke(task);
+                task.TriedPorts.Add(_sim.ComPort);
+                task.RetryCount++;
+                if (task.AllowRedispatch && task.RetryCount < _maxRetries && _onRetryNeeded != null)
+                    _onRetryNeeded(task);
+                else
+                    task.CompletionSource?.TrySetResult(false);
                 _sim.Status = SimStatus.Online;
                 _onSimUpdated(_sim);
                 return;
@@ -196,8 +200,12 @@ public class ModemWorker : IDisposable
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"🚫 [{_sim.ComPort}] SIM bị block đến {_sim.BlockedUntil:HH:mm:ss} — skip");
-                task.CompletionSource?.TrySetResult(false);
-                _onRetryNeeded?.Invoke(task);
+                task.TriedPorts.Add(_sim.ComPort);
+                task.RetryCount++;
+                if (task.AllowRedispatch && task.RetryCount < _maxRetries && _onRetryNeeded != null)
+                    _onRetryNeeded(task);
+                else
+                    task.CompletionSource?.TrySetResult(false);
                 _sim.Status = SimStatus.Online;
                 _onSimUpdated(_sim);
                 return;
@@ -252,7 +260,7 @@ public class ModemWorker : IDisposable
                     $"🚫 [{_sim.ComPort}] SIM blocked do 5 fails liên tiếp — block 10 phút");
             }
 
-            if (task.RetryCount < _maxRetries && _onRetryNeeded != null)
+            if (task.AllowRedispatch && task.RetryCount < _maxRetries && _onRetryNeeded != null)
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"🔄 [{_sim.ComPort}] SMS {task.MessageId} FAIL → retry #{task.RetryCount} trên SIM khác (đã thử: {string.Join(",", task.TriedPorts)})");
@@ -262,7 +270,6 @@ public class ModemWorker : IDisposable
             }
             else
             {
-                _sim.TotalFailed++;
                 _onSmsResult(task.MessageId, "FAILED", false, error);
                 System.Diagnostics.Debug.WriteLine(
                     $"❌ [{_sim.ComPort}] SMS {task.MessageId} FAILED sau {task.RetryCount} lần retry");
@@ -271,7 +278,7 @@ public class ModemWorker : IDisposable
         }
         else
         {
-            _onSmsResult(task.MessageId, "DELIVERED", true, null);
+            _onSmsResult(task.MessageId, "SENT", true, null);
             task.CompletionSource?.TrySetResult(true); // 🆕 Notify manual sender
         }
 
@@ -307,7 +314,7 @@ public class ModemWorker : IDisposable
                     _processedSmsCache.TryRemove(key, out _);
             }
 
-            var allMessages = new List<(int index, string sender, string content, DateTime time)>();
+            var allMessages = new List<(string storage, int index, string sender, string content, DateTime time)>();
 
             // 🔥 Set text mode + UCS2 charset 1 lần duy nhất trước khi scan
             // (tránh gọi AT+CMGF=1 + AT+CSCS="UCS2" x4 mỗi scan cycle)
@@ -339,7 +346,7 @@ public class ModemWorker : IDisposable
                         }
                     }
 
-                    allMessages.AddRange(smsInStore);
+                    allMessages.AddRange(smsInStore.Select(m => (storage, m.index, m.sender, m.content, m.time)));
                     System.Diagnostics.Debug.WriteLine(
                         $"📬 [{_sim.ComPort}] Found {smsInStore.Count} SMS in {storage} (total {allMessages.Count})");
                 }
@@ -355,25 +362,51 @@ public class ModemWorker : IDisposable
 
             int processedCount = 0;
 
-            foreach (var (index, sender, content, time) in allMessages)
+            string? activeStorage = null;
+
+            bool EnsureStorage(string storage)
+            {
+                if (activeStorage == storage)
+                    return true;
+
+                if (_helper.SetStorage(storage))
+                {
+                    activeStorage = storage;
+                    return true;
+                }
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"⚠️ [{_sim.ComPort}] Cannot switch back to storage {storage} for delete");
+                return false;
+            }
+
+            foreach (var (storage, index, sender, content, time) in allMessages)
             {
                 // 🔥 TTL-based duplicate check (giống Java: processedSmsCache)
-                var hash = $"{sender}|{content}|{time:yyyyMMddHHmm}";
+                var hash = $"{sender}|{content}|{time:yyyyMMddHHmmss}";
                 if (_processedSmsCache.ContainsKey(hash))
                 {
-                    _helper.DeleteSms(index);
+                    if (EnsureStorage(storage))
+                        _helper.DeleteSms(index);
+                    continue;
+                }
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"📨 [{_sim.ComPort}] SMS from {sender}: {content}");
+                var accepted = _onIncomingSms?.Invoke(_sim.ComPort, sender, content, time) ?? true;
+                if (!accepted)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ [{_sim.ComPort}] Failed to persist incoming SMS, keeping index {index} in {storage}");
                     continue;
                 }
 
                 _processedSmsCache[hash] = DateTime.Now;
                 processedCount++;
 
-                System.Diagnostics.Debug.WriteLine(
-                    $"📨 [{_sim.ComPort}] SMS from {sender}: {content}");
-                _onIncomingSms?.Invoke(_sim.ComPort, sender, content, time);
-
-                // Delete SMS after processing to free storage
-                _helper.DeleteSms(index);
+                // Delete SMS only after it has been persisted to local forward queue
+                if (EnsureStorage(storage))
+                    _helper.DeleteSms(index);
             }
 
             // Update simulated URC count after processing
@@ -422,6 +455,7 @@ public class SmsTask
     public DateTime QueuedAt { get; set; } = DateTime.Now;
     public int RetryCount { get; set; }
     public HashSet<string> TriedPorts { get; set; } = new();
+    public bool AllowRedispatch { get; set; } = true;
 
     /// <summary>🆕 Nếu set, ProcessSmsTask sẽ complete khi gửi xong (cho manual SMS await kết quả).</summary>
     public TaskCompletionSource<bool>? CompletionSource { get; set; }

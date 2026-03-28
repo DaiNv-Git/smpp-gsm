@@ -78,7 +78,7 @@ public class AtCommandHelper : IDisposable
                 _port.DiscardInBuffer();
                 _port.DiscardOutBuffer();
                 _port.Write(command + "\r");
-                Thread.Sleep(100);
+                Thread.Sleep(Math.Min(timeoutMs, 300));
 
                 var sb = new StringBuilder();
                 var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
@@ -94,7 +94,7 @@ public class AtCommandHelper : IDisposable
                         if (resp.Contains("OK") || resp.Contains("ERROR"))
                             break;
                     }
-                    Thread.Sleep(30);
+                    Thread.Sleep(50);
                 }
 
                 return sb.ToString();
@@ -313,6 +313,8 @@ public class AtCommandHelper : IDisposable
         {
             try
             {
+                if (!_port.IsOpen) return false;
+
                 // Set text mode
                 SendAndRead("AT+CMGF=1", 500);
 
@@ -331,7 +333,8 @@ public class AtCommandHelper : IDisposable
                 }
                 else
                 {
-                    SendAndRead("AT+CSCS=\"GSM\"", 500);
+                    SendAndRead("AT+CSCS=\"IRA\"", 500);
+                    SendAndRead("AT+CSMP=17,167,0,0", 500);
                     actualContent = content;
                 }
 
@@ -389,13 +392,17 @@ public class AtCommandHelper : IDisposable
                 // Wait for result
                 var sb = new StringBuilder();
                 var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
+                bool gotCmgs = false;
                 while (DateTime.Now < deadline)
                 {
                     if (_port.BytesToRead > 0)
                     {
                         sb.Append(_port.ReadExisting());
                         var result = sb.ToString();
-                        if (result.Contains("OK") || result.Contains("+CMGS"))
+                        if (result.Contains("+CMGS"))
+                            gotCmgs = true;
+
+                        if (result.Contains("OK"))
                             return true;
                         if (result.Contains("ERROR"))
                             return false;
@@ -403,7 +410,14 @@ public class AtCommandHelper : IDisposable
                     Thread.Sleep(100);
                 }
 
-                return sb.ToString().Contains("OK") || sb.ToString().Contains("+CMGS");
+                var finalResult = sb.ToString();
+                if (gotCmgs && !finalResult.Contains("ERROR"))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ SendSms: got +CMGS but no final OK before timeout: {finalResult}");
+                }
+
+                return false;
             }
             catch (Exception ex)
             {
@@ -632,9 +646,29 @@ public class AtCommandHelper : IDisposable
     {
         try
         {
-            // Format: "26/03/26,10:30:00+36" or "2026/03/26,10:30:00+36"
-            var parts = ts.Replace("\"", "").Split('+')[0].Split('-')[0];
-            if (DateTime.TryParse(parts, out var dt)) return dt;
+            // Format phổ biến: "26/03/26,10:30:00+36" hoặc "2026/03/26,10:30:00-04"
+            var value = ts.Replace("\"", "").Trim();
+            var match = Regex.Match(
+                value,
+                @"^(?<date>\d{2,4}/\d{2}/\d{2}),(?<time>\d{2}:\d{2}:\d{2})(?<offset>[+-]\d{2})?$");
+
+            if (match.Success)
+            {
+                var dateTimePart = $"{match.Groups["date"].Value},{match.Groups["time"].Value}";
+                var formats = new[] { "yy/MM/dd,HH:mm:ss", "yyyy/MM/dd,HH:mm:ss" };
+                if (DateTime.TryParseExact(
+                    dateTimePart,
+                    formats,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out var dt))
+                {
+                    return dt;
+                }
+            }
+
+            if (DateTime.TryParse(value, out var fallback))
+                return fallback;
         }
         catch { }
         return DateTime.Now;

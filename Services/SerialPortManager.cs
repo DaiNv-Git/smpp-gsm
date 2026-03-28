@@ -295,9 +295,9 @@ public class SerialPortManager : IDisposable
             {
                 IncomingSms?.Invoke(sender, content, time);
 
-                // 📤 Enqueue SMS để forward lên API (xử lý tuần tự, có retry)
+                // Persist local queue first, API forward still happens asynchronously.
                 var receiver = sim.PhoneNumber ?? comPort;
-                _forwarder.Enqueue(sender, receiver, content, comPort);
+                return _forwarder.Enqueue(sender, receiver, content, comPort);
             }
         );
 
@@ -354,6 +354,7 @@ public class SerialPortManager : IDisposable
                     DestAddr = destNumber,
                     SourceAddr = _sims.TryGetValue(comPort, out var s) ? s.PhoneNumber ?? "" : "",
                     Content = content,
+                    AllowRedispatch = false,
                     CompletionSource = tcs, // 🆕 Đợi kết quả thật
                 };
                 worker.EnqueueSms(task);
