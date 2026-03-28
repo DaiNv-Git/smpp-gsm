@@ -484,6 +484,7 @@
                             <ComboBox ItemsSource="{Binding SimList}"
                                 SelectedItem="{Binding SelectedSim}"
                                 DisplayMemberPath="SimDisplayName"
+                                Style="{StaticResource DarkComboBoxStyle}"
                                 Background="{StaticResource BgCardBrush}"
                                 Foreground="{StaticResource TextPrimaryBrush}"
                                 BorderBrush="{StaticResource BorderSubtleBrush}"

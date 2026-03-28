@@ -120,10 +120,11 @@
             </ControlTemplate.Triggers>
         </ControlTemplate>
 
-        <Style TargetType="ComboBox">
+        <Style x:Key="DarkComboBoxStyle" TargetType="ComboBox">
             <Setter Property="Foreground" Value="#f0f6fc"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Height" Value="36"/>
+            <Setter Property="ItemContainerStyle" Value="{DynamicResource DarkComboBoxItemStyle}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBox">
@@ -133,6 +134,7 @@
                                 IsChecked="{Binding Path=IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                                 Focusable="False" ClickMode="Press"/>
                             <ContentPresenter Name="ContentSite"
+                                TextElement.Foreground="{TemplateBinding Foreground}"
                                 IsHitTestVisible="False"
                                 Content="{TemplateBinding SelectionBoxItem}"
                                 ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
@@ -165,7 +167,7 @@
             </Setter>
         </Style>
 
-        <Style TargetType="ComboBoxItem">
+        <Style x:Key="DarkComboBoxItemStyle" TargetType="ComboBoxItem">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="#f0f6fc"/>
             <Setter Property="Padding" Value="10,7"/>

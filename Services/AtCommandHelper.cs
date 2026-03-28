@@ -65,7 +65,7 @@ public class AtCommandHelper : IDisposable
                 _port.DiscardInBuffer();
                 _port.DiscardOutBuffer();
                 _port.Write(command + "\r");
-                Thread.Sleep(Math.Min(timeoutMs, 300));
+                Thread.Sleep(10); // Cho modem chút thời gian
 
                 var sb = new StringBuilder();
                 var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
@@ -78,7 +78,7 @@ public class AtCommandHelper : IDisposable
                         if (sb.ToString().Contains("OK") || sb.ToString().Contains("ERROR"))
                             break;
                     }
-                    Thread.Sleep(50);
+                    Thread.Sleep(20);
                 }
 
                 return sb.ToString();
