@@ -263,17 +263,15 @@ public class AtCommandHelper : IDisposable
         return -1;
     }
 
-    /// <summary>Nhận diện nhà mạng từ IMSI — hỗ trợ SIM Nhật.</summary>
+    /// <summary>Nhận diện nhà mạng từ IMSI — giống detectProvider() trong Java SimSyncService.</summary>
     public static string DetectProvider(string? imsi)
     {
         if (string.IsNullOrWhiteSpace(imsi)) return "Unknown";
-        if (imsi.StartsWith("44010")) return "NTT Docomo (JP)";
-        if (imsi.StartsWith("44011")) return "Rakuten Mobile (JP)";
-        if (imsi.StartsWith("44020")) return "SoftBank (JP)";
-        if (imsi.StartsWith("44050")) return "KDDI/au (JP)";
         if (imsi.StartsWith("45204") || imsi.StartsWith("45205")) return "Viettel (VN)";
         if (imsi.StartsWith("45201")) return "Mobifone (VN)";
         if (imsi.StartsWith("45202")) return "Vinaphone (VN)";
+        if (imsi.StartsWith("44010")) return "NTT Docomo (JP)";
+        if (imsi.StartsWith("44011")) return "Rakuten Mobile (JP)";
         return "Unknown";
     }
 
