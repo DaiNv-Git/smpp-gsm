@@ -361,8 +361,7 @@
 
                     <!-- Filter Chips -->
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Style="{StaticResource FilterChip}"
-                            Command="{Binding FilterMessagesCommand}" CommandParameter="ALL">
+                        <Button Command="{Binding FilterMessagesCommand}" CommandParameter="ALL">
                             <Button.Background>
                                 <SolidColorBrush Color="#30363d"/>
                             </Button.Background>

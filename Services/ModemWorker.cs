@@ -327,6 +327,7 @@ public class ModemWorker : IDisposable
             }
 
             var allMessages = new List<(string storage, int index, string sender, string content, DateTime time)>();
+            var scannedStorages = new HashSet<string>(StringComparer.Ordinal);
 
             // Set text mode + UCS2 charset 1 lần trước khi scan
             _helper.PrepareForRead();
@@ -343,6 +344,7 @@ public class ModemWorker : IDisposable
                         continue;
                     }
 
+                    scannedStorages.Add(storage);
                     var smsInStore = _helper.ListUnreadSms(5000);
 
                     allMessages.AddRange(smsInStore.Select(m => (storage, m.index, m.sender, m.content, m.time)));
@@ -365,6 +367,7 @@ public class ModemWorker : IDisposable
             int processedCount = 0;
 
             string? activeStorage = null;
+            var seenThisScan = new HashSet<string>(StringComparer.Ordinal);
 
             bool EnsureStorage(string storage)
             {
@@ -384,11 +387,9 @@ public class ModemWorker : IDisposable
 
             foreach (var (storage, index, sender, content, time) in allMessages)
             {
-                // 🔥 FIX: Dùng sender + content + time (KHÔNG dùng index vì modem tái sử dụng index sau khi xóa)
-                var hash = $"{sender}|{content}|{time:yyyyMMddHHmmss}";
-                if (_processedSmsCache.ContainsKey(hash))
+                var cacheKeys = BuildDuplicateKeys(sender, content, time);
+                if (cacheKeys.Any(seenThisScan.Contains) || cacheKeys.Any(_processedSmsCache.ContainsKey))
                 {
-                    // Đã xử lý rồi → chỉ xóa trên modem (nếu lần trước xóa lỗi)
                     System.Diagnostics.Debug.WriteLine(
                         $"⏭️ [{_sim.ComPort}] Skip duplicate SMS (already processed): {sender} | {content.Substring(0, Math.Min(30, content.Length))}...");
                     if (EnsureStorage(storage))
@@ -406,12 +407,22 @@ public class ModemWorker : IDisposable
                     continue;
                 }
 
-                _processedSmsCache[hash] = DateTime.Now;
+                foreach (var key in cacheKeys)
+                {
+                    seenThisScan.Add(key);
+                    _processedSmsCache[key] = DateTime.Now;
+                }
                 processedCount++;
 
                 // Delete SMS only after it has been persisted to local forward queue
                 if (EnsureStorage(storage))
                     _helper.DeleteSms(index);
+            }
+
+            foreach (var storage in scannedStorages)
+            {
+                if (EnsureStorage(storage))
+                    _helper.CleanupReadSms();
             }
 
             // Update simulated URC count after processing
@@ -426,6 +437,54 @@ public class ModemWorker : IDisposable
         {
             System.Diagnostics.Debug.WriteLine($"❌ [{_sim.ComPort}] ReadSMS error: {ex.Message}");
         }
+    }
+
+    private static string[] BuildDuplicateKeys(string sender, string content, DateTime time)
+    {
+        var normalizedSender = NormalizeSender(sender);
+        var normalizedContent = NormalizeContent(content);
+        var exactTime = time.ToUniversalTime().ToString("yyyyMMddHHmmss");
+
+        // Một số modem duplicate cùng SMS giữa ME/SM nhưng timestamp lệch nhẹ vài chục giây.
+        var fuzzyBucket = time.ToUniversalTime().ToString("yyyyMMddHHmm");
+
+        return
+        [
+            $"{normalizedSender}|{normalizedContent}|{exactTime}",
+            $"{normalizedSender}|{normalizedContent}|{fuzzyBucket}"
+        ];
+    }
+
+    private static string NormalizeSender(string sender)
+    {
+        if (string.IsNullOrWhiteSpace(sender))
+            return "";
+
+        var digits = new string(sender.Where(char.IsDigit).ToArray());
+        if (digits.Length >= 6)
+        {
+            if (digits.StartsWith("81") && !sender.TrimStart().StartsWith("+", StringComparison.Ordinal))
+                return "+" + digits;
+            if (sender.Contains('+'))
+                return "+" + digits;
+            return digits;
+        }
+
+        return sender.Trim();
+    }
+
+    private static string NormalizeContent(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return "";
+
+        return string.Join(
+            " ",
+            content
+                .Replace("\r", " ")
+                .Replace("\n", " ")
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Trim();
     }
 
     /// <summary>Refresh SIM info (signal, status).</summary>

@@ -105,7 +105,7 @@
           }
         }
       },
-      "Microsoft.NET.ILLink.Tasks/8.0.15": {
+      "Microsoft.NET.ILLink.Tasks/8.0.11": {
         "type": "package",
         "build": {
           "build/Microsoft.NET.ILLink.Tasks.props": {}
@@ -805,7 +805,7 @@
           }
         }
       },
-      "Microsoft.NET.ILLink.Tasks/8.0.15": {
+      "Microsoft.NET.ILLink.Tasks/8.0.11": {
         "type": "package",
         "build": {
           "build/Microsoft.NET.ILLink.Tasks.props": {}
@@ -1432,10 +1432,10 @@
         "microsoft.extensions.logging.abstractions.nuspec"
       ]
     },
-    "Microsoft.NET.ILLink.Tasks/8.0.15": {
-      "sha512": "s4eXlcRGyHeCgFUGQnhq0e/SCHBPp0jOHgMqZg3fQ2OCHJSm1aOUhI6RFWuVIcEb9ig2WgI2kWukk8wu72EbUQ==",
+    "Microsoft.NET.ILLink.Tasks/8.0.11": {
+      "sha512": "zk5lnZrYJgtuJG8L4v17Ej8rZ3PUcR2iweNV08BaO5LbYHIi2wNaVNcJoLxvqgQdnjLlKnCCfVGLDr6QHeAarQ==",
       "type": "package",
-      "path": "microsoft.net.illink.tasks/8.0.15",
+      "path": "microsoft.net.illink.tasks/8.0.11",
       "hasTools": true,
       "files": [
         ".nupkg.metadata",
@@ -1449,7 +1449,7 @@
         "build/Microsoft.NET.ILLink.Analyzers.props",
         "build/Microsoft.NET.ILLink.Tasks.props",
         "build/Microsoft.NET.ILLink.targets",
-        "microsoft.net.illink.tasks.8.0.15.nupkg.sha512",
+        "microsoft.net.illink.tasks.8.0.11.nupkg.sha512",
         "microsoft.net.illink.tasks.nuspec",
         "tools/net472/ILLink.Tasks.dll",
         "tools/net472/ILLink.Tasks.dll.config",
@@ -2533,7 +2533,7 @@
     "net8.0-windows7.0": [
       "CommunityToolkit.Mvvm >= 8.2.2",
       "Microsoft.Data.Sqlite >= 8.0.0",
-      "Microsoft.NET.ILLink.Tasks >= 8.0.15",
+      "Microsoft.NET.ILLink.Tasks >= 8.0.11",
       "MongoDB.Driver >= 2.28.0",
       "Newtonsoft.Json >= 13.0.3",
       "SocketIOClient >= 3.1.1",
@@ -2541,32 +2541,25 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\Admin\\.nuget\\packages\\": {},
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+    "/Users/nguyenvandai/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Admin\\Downloads\\project\\smpp-gsm\\GsmAgent.csproj",
-      "projectName": "GsmAgent",
-      "projectPath": "C:\\Users\\Admin\\Downloads\\project\\smpp-gsm\\GsmAgent.csproj",
-      "packagesPath": "C:\\Users\\Admin\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Admin\\Downloads\\project\\smpp-gsm\\obj\\",
+      "projectUniqueName": "/Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/GsmAgent.csproj",
+      "projectName": "SmsGlobal",
+      "projectPath": "/Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/GsmAgent.csproj",
+      "packagesPath": "/Users/nguyenvandai/.nuget/packages/",
+      "outputPath": "/Users/nguyenvandai/Desktop/project/gsm/smpp-gsm/obj/",
       "projectStyle": "PackageReference",
-      "fallbackFolders": [
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-      ],
       "configFilePaths": [
-        "C:\\Users\\Admin\\AppData\\Roaming\\NuGet\\NuGet.Config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        "/Users/nguyenvandai/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0-windows"
       ],
       "sources": {
-        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-        "C:\\Program Files\\dotnet\\library-packs": {},
+        "/usr/local/share/dotnet/library-packs": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
@@ -2583,9 +2576,9 @@
       "restoreAuditProperties": {
         "enableAudit": "true",
         "auditLevel": "low",
-        "auditMode": "direct"
+        "auditMode": "all"
       },
-      "SdkAnalysisLevel": "9.0.200"
+      "SdkAnalysisLevel": "9.0.100"
     },
     "frameworks": {
       "net8.0-windows7.0": {
@@ -2602,7 +2595,7 @@
           "Microsoft.NET.ILLink.Tasks": {
             "suppressParent": "All",
             "target": "Package",
-            "version": "[8.0.15, )",
+            "version": "[8.0.11, )",
             "autoReferenced": true
           },
           "MongoDB.Driver": {
@@ -2635,16 +2628,32 @@
         "warn": true,
         "downloadDependencies": [
           {
+            "name": "Microsoft.AspNetCore.App.Ref",
+            "version": "[8.0.11, 8.0.11]"
+          },
+          {
             "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
-            "version": "[8.0.15, 8.0.15]"
+            "version": "[8.0.11, 8.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Host.win-x64",
+            "version": "[8.0.11, 8.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[8.0.11, 8.0.11]"
           },
           {
             "name": "Microsoft.NETCore.App.Runtime.win-x64",
-            "version": "[8.0.15, 8.0.15]"
+            "version": "[8.0.11, 8.0.11]"
+          },
+          {
+            "name": "Microsoft.WindowsDesktop.App.Ref",
+            "version": "[8.0.11, 8.0.11]"
           },
           {
             "name": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
-            "version": "[8.0.15, 8.0.15]"
+            "version": "[8.0.11, 8.0.11]"
           }
         ],
         "frameworkReferences": {
@@ -2655,7 +2664,7 @@
             "privateAssets": "none"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.203/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/9.0.100/PortableRuntimeIdentifierGraph.json"
       }
     },
     "runtimes": {
@@ -2663,5 +2672,13 @@
         "#import": []
       }
     }
-  }
+  },
+  "logs": [
+    {
+      "code": "NU1900",
+      "level": "Warning",
+      "warningLevel": 1,
+      "message": "Error occurred while getting package vulnerability data: Unable to load the service index for source https://api.nuget.org/v3/index.json."
+    }
+  ]
 }
