@@ -590,13 +590,19 @@ public partial class MainViewModel : ObservableObject
         {
             await Task.Run(async () =>
             {
-                // 1. Mở COM port
+                // 1. Tạm dừng SMS worker trên port này
+                UpdateCallUI(callRecord, CallState.Dialing, $"⏸️ Tạm dừng SMS worker trên {sim.ComPort}...");
+                _portManager.StopWorkerForPort(sim.ComPort);
+                await Task.Delay(300);
+
+                // 2. Mở COM port
                 var helper = new AtCommandHelper(sim.ComPort, Settings.BaudRate);
                 _activeCallHelper = helper;
 
                 if (!helper.Open())
                 {
                     UpdateCallUI(callRecord, CallState.Failed, "❌ Không thể mở " + sim.ComPort);
+                    _portManager.RestartWorkerForPort(sim.ComPort);
                     return;
                 }
 
@@ -604,20 +610,22 @@ public partial class MainViewModel : ObservableObject
                 {
                     UpdateCallUI(callRecord, CallState.Failed, "❌ Modem không phản hồi");
                     helper.Dispose();
+                    _portManager.RestartWorkerForPort(sim.ComPort);
                     return;
                 }
 
-                // 2. Gọi điện
+                // 3. Gọi điện
                 UpdateCallUI(callRecord, CallState.Dialing, $"📞 Đang gọi {dest}...");
 
                 if (!helper.MakeVoiceCall(dest))
                 {
                     UpdateCallUI(callRecord, CallState.Failed, "❌ Gọi thất bại");
                     helper.Dispose();
+                    _portManager.RestartWorkerForPort(sim.ComPort);
                     return;
                 }
 
-                // 3. Poll trạng thái — đợi bắt máy hoặc timeout 45s
+                    // 4. Poll trạng thái — đợi bắt máy hoặc timeout 45s
                 UpdateCallUI(callRecord, CallState.Ringing, "🔔 Đang đổ chuông...");
                 var ringStart = DateTime.Now;
                 bool answered = false;
@@ -634,9 +642,9 @@ public partial class MainViewModel : ObservableObject
                     }
                     else if (status == -1) // No call = đã kết thúc
                     {
-                        // Check NO CARRIER / BUSY
                         UpdateCallUI(callRecord, CallState.NoAnswer, "❌ Không ai bắt máy");
                         helper.Dispose();
+                        _portManager.RestartWorkerForPort(sim.ComPort);
                         return;
                     }
 
@@ -646,6 +654,7 @@ public partial class MainViewModel : ObservableObject
                         UpdateCallUI(callRecord, CallState.NoAnswer, "❌ 45s không bắt máy - tự động tắt");
                         helper.HangUp();
                         helper.Dispose();
+                        _portManager.RestartWorkerForPort(sim.ComPort);
                         return;
                     }
                 }
@@ -654,6 +663,7 @@ public partial class MainViewModel : ObservableObject
                 {
                     helper.HangUp();
                     helper.Dispose();
+                    _portManager.RestartWorkerForPort(sim.ComPort);
                     return;
                 }
 
@@ -745,9 +755,14 @@ public partial class MainViewModel : ObservableObject
                 helper.Dispose();
                 _activeCallHelper = null;
 
+                // 9. Khởi động lại SMS worker
+                UpdateCallUI(callRecord, CallState.Ended, "▶️ Đang khởi động lại SMS worker...");
+                _portManager.RestartWorkerForPort(sim.ComPort);
+
                 // Update call record in history
                 Application.Current.Dispatcher.Invoke(() =>
                 {
+                    CallStatus = "✅ Hoàn thành — SMS worker đã resume";
                     var idx = CallHistory.IndexOf(callRecord);
                     if (idx >= 0)
                     {
@@ -760,11 +775,13 @@ public partial class MainViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             UpdateCallUI(callRecord, CallState.Ended, "⏹️ Cuộc gọi đã hủy");
+            _portManager.RestartWorkerForPort(sim.ComPort);
         }
         catch (Exception ex)
         {
             UpdateCallUI(callRecord, CallState.Failed, $"❌ Lỗi: {ex.Message}");
             Logger.Error($"MakeCall error: {ex.Message}");
+            _portManager.RestartWorkerForPort(sim.ComPort);
         }
         finally
         {

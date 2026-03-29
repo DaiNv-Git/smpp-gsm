@@ -400,6 +400,38 @@ public class SerialPortManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Tạm dừng worker trên 1 COM port cụ thể (để nhường cho voice call).
+    /// Returns: SimCard nếu đang có worker, null nếu port tự do.
+    /// </summary>
+    public SimCard? StopWorkerForPort(string comPort)
+    {
+        if (_workers.TryRemove(comPort, out var worker))
+        {
+            var sim = worker.Sim;
+            System.Diagnostics.Debug.WriteLine($"⏸️ Pausing worker on {comPort} for voice call");
+            try { worker.Dispose(); } catch { }
+            // Đợi port release
+            Thread.Sleep(500);
+            return sim;
+        }
+        return _sims.TryGetValue(comPort, out var s) ? s : null;
+    }
+
+    /// <summary>
+    /// Khởi động lại worker sau khi voice call kết thúc.
+    /// </summary>
+    public void RestartWorkerForPort(string comPort)
+    {
+        if (_sims.TryGetValue(comPort, out var sim) && sim.Status != SimStatus.Error)
+        {
+            // Đảm bảo port đã release
+            Thread.Sleep(500);
+            StartWorker(sim);
+            System.Diagnostics.Debug.WriteLine($"▶️ Worker resumed on {comPort}");
+        }
+    }
+
     public void StopAllWorkers()
     {
         foreach (var worker in _workers.Values)
