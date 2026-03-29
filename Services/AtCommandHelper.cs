@@ -726,6 +726,255 @@ public class AtCommandHelper : IDisposable
         return text;
     }
 
+    // ==================== VOICE CALL ====================
+
+    /// <summary>Gọi điện thoại (voice call). Semicolon quan trọng để modem hiểu là voice call.</summary>
+    public bool MakeVoiceCall(string destNumber)
+    {
+        lock (_lock)
+        {
+            try
+            {
+                if (!_port.IsOpen) return false;
+                var normalized = NormalizeNumber(destNumber);
+
+                _port.DiscardInBuffer();
+                _port.DiscardOutBuffer();
+                _port.Write($"ATD{normalized};\r");
+
+                // Đợi response (OK = dialing started, ERROR = failed)
+                var sb = new StringBuilder();
+                var deadline = DateTime.Now.AddMilliseconds(10000);
+                while (DateTime.Now < deadline)
+                {
+                    if (_port.BytesToRead > 0)
+                    {
+                        sb.Append(_port.ReadExisting());
+                        var resp = sb.ToString();
+                        if (resp.Contains("OK")) return true;
+                        if (resp.Contains("ERROR") || resp.Contains("NO CARRIER") || resp.Contains("NO DIALTONE"))
+                            return false;
+                    }
+                    Thread.Sleep(100);
+                }
+
+                // Nhiều modem không trả OK ngay mà bắt đầu gọi luôn → coi như thành công
+                return !sb.ToString().Contains("ERROR");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ MakeVoiceCall failed: {ex.Message}");
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Cúp máy.</summary>
+    public bool HangUp()
+    {
+        try
+        {
+            var resp = SendAndRead("ATH", 3000);
+            return resp.Contains("OK");
+        }
+        catch
+        {
+            // Force hangup bằng cách gửi ATH nhiều lần
+            try
+            {
+                _port.Write("ATH\r");
+                Thread.Sleep(500);
+                _port.Write("ATH\r");
+            }
+            catch { }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Poll trạng thái cuộc gọi bằng AT+CLCC.
+    /// Returns: -1=no call, 0=active, 2=dialing, 3=alerting/ringing, 6=released.
+    /// </summary>
+    public int GetCallStatus()
+    {
+        lock (_lock)
+        {
+            try
+            {
+                if (!_port.IsOpen) return -1;
+
+                _port.DiscardInBuffer();
+                _port.Write("AT+CLCC\r");
+                Thread.Sleep(300);
+
+                var sb = new StringBuilder();
+                var deadline = DateTime.Now.AddMilliseconds(1500);
+                while (DateTime.Now < deadline)
+                {
+                    if (_port.BytesToRead > 0)
+                        sb.Append(_port.ReadExisting());
+                    if (sb.ToString().Contains("OK") || sb.ToString().Contains("ERROR"))
+                        break;
+                    Thread.Sleep(50);
+                }
+
+                var resp = sb.ToString();
+                // +CLCC: <idx>,<dir>,<stat>,<mode>,<mpty>[,<number>,<type>]
+                var match = Regex.Match(resp, @"\+CLCC:\s*\d+,\d+,(\d+)");
+                if (match.Success)
+                    return int.Parse(match.Groups[1].Value);
+
+                // Không có +CLCC line = không có cuộc gọi nào
+                return -1;
+            }
+            catch { return -1; }
+        }
+    }
+
+    /// <summary>Bật CLCC unsolicited result code (tùy chọn).</summary>
+    public bool EnableClcc()
+    {
+        var resp = SendAndRead("AT+CLCC=1", 1000);
+        return resp.Contains("OK");
+    }
+
+    /// <summary>
+    /// Bắt đầu ghi âm cuộc gọi trên modem.
+    /// Thử Quectel (AT+QAUDREC) → SIMCom (AT+CREC).
+    /// Returns: true nếu modem hỗ trợ ghi âm.
+    /// </summary>
+    public bool StartCallRecording(string filename, int durationSec)
+    {
+        // Try 1: Quectel style — AT+QAUDREC=1,0,2,<duration>
+        // Params: 1=start, 0=no play, 2=both directions, duration
+        var resp = SendAndRead($"AT+QAUDREC=1,0,2,{durationSec}", 2000);
+        if (resp.Contains("OK"))
+        {
+            System.Diagnostics.Debug.WriteLine("🎙️ Quectel recording started");
+            return true;
+        }
+
+        // Try 2: SIMCom SIM7600 style — AT+CREC=1,"filename",0,100
+        resp = SendAndRead($"AT+CREC=1,\"{filename}\",0,100", 2000);
+        if (resp.Contains("OK"))
+        {
+            System.Diagnostics.Debug.WriteLine("🎙️ SIMCom recording started");
+            return true;
+        }
+
+        // Try 3: Generic — AT+CREC=1
+        resp = SendAndRead("AT+CREC=1", 2000);
+        if (resp.Contains("OK"))
+        {
+            System.Diagnostics.Debug.WriteLine("🎙️ Generic recording started");
+            return true;
+        }
+
+        System.Diagnostics.Debug.WriteLine("⚠️ Modem không hỗ trợ ghi âm");
+        return false;
+    }
+
+    /// <summary>Dừng ghi âm.</summary>
+    public bool StopCallRecording()
+    {
+        // Try Quectel
+        var resp = SendAndRead("AT+QAUDREC=0", 2000);
+        if (resp.Contains("OK")) return true;
+
+        // Try SIMCom
+        resp = SendAndRead("AT+CREC=0", 2000);
+        if (resp.Contains("OK")) return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Tải file ghi âm từ modem về local.
+    /// Thử Quectel AT+QFDWL → SIMCom AT+FSREAD.
+    /// Returns: binary data hoặc null nếu không hỗ trợ.
+    /// </summary>
+    public byte[]? DownloadRecordingFile(string modemFilePath, int timeoutMs = 30000)
+    {
+        lock (_lock)
+        {
+            if (!_port.IsOpen) return null;
+            try
+            {
+                _port.DiscardInBuffer();
+                _port.Write($"AT+QFDWL=\"{modemFilePath}\"\r");
+
+                // Đợi CONNECT <filesize>
+                var headerSb = new StringBuilder();
+                var deadline = DateTime.Now.AddMilliseconds(5000);
+                while (DateTime.Now < deadline)
+                {
+                    if (_port.BytesToRead > 0)
+                    {
+                        headerSb.Append(_port.ReadExisting());
+                        var header = headerSb.ToString();
+                        if (header.Contains("CONNECT")) break;
+                        if (header.Contains("ERROR")) return null;
+                    }
+                    Thread.Sleep(50);
+                }
+
+                var connectMatch = Regex.Match(headerSb.ToString(), @"CONNECT\s+(\d+)");
+                if (!connectMatch.Success) return null;
+                var fileSize = int.Parse(connectMatch.Groups[1].Value);
+
+                System.Diagnostics.Debug.WriteLine($"📥 Downloading {fileSize} bytes from modem...");
+
+                // Đọc binary data
+                var data = new byte[fileSize];
+                int totalRead = 0;
+                deadline = DateTime.Now.AddMilliseconds(timeoutMs);
+
+                while (totalRead < fileSize && DateTime.Now < deadline)
+                {
+                    if (_port.BytesToRead > 0)
+                    {
+                        int toRead = Math.Min(_port.BytesToRead, fileSize - totalRead);
+                        int read = _port.Read(data, totalRead, toRead);
+                        totalRead += read;
+                    }
+                    Thread.Sleep(10);
+                }
+
+                if (totalRead < fileSize)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ Download incomplete: {totalRead}/{fileSize} bytes");
+                    return null;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"✅ Download complete: {totalRead} bytes");
+                return data;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ DownloadRecordingFile failed: {ex.Message}");
+                return null;
+            }
+        }
+    }
+
+    /// <summary>Xóa file trên modem.</summary>
+    public bool DeleteModemFile(string filename)
+    {
+        try
+        {
+            var resp = SendAndRead($"AT+QFDEL=\"{filename}\"", 2000);
+            return resp.Contains("OK");
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Liệt kê file trên modem (debug).</summary>
+    public string ListModemFiles()
+    {
+        return SendAndRead("AT+QFLST", 3000);
+    }
+
     public void Dispose()
     {
         if (!_disposed)

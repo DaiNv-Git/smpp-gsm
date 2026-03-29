@@ -4,6 +4,8 @@ using GsmAgent.Models;
 using GsmAgent.Services;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
@@ -44,8 +46,23 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _smsResult = "";
     [ObservableProperty] private bool _isSending;
 
+    // 📞 Voice Call properties
+    [ObservableProperty] private SimCard? _selectedCallSim;
+    [ObservableProperty] private string _callDestNumber = "";
+    [ObservableProperty] private bool _enableRecording = true;
+    [ObservableProperty] private int _callDurationSeconds = 30;
+    [ObservableProperty] private string _callStatus = "Sẵn sàng";
+    [ObservableProperty] private string _callStatusIcon = "☎️";
+    [ObservableProperty] private bool _isCalling;
+    [ObservableProperty] private int _callElapsedSeconds;
+    [ObservableProperty] private string _recordingStatus = "";
+    [ObservableProperty] private Uri? _mediaSource;
+    private CancellationTokenSource? _callCts;
+    private AtCommandHelper? _activeCallHelper;
+
     public ObservableCollection<SimCard> SimList { get; } = new();
     public ObservableCollection<SmsMessage> MessageList { get; } = new();
+    public ObservableCollection<CallRecord> CallHistory { get; } = new();
     public ICollectionView FilteredMessages { get; private set; }
 
     public MainViewModel()
@@ -516,12 +533,316 @@ public partial class MainViewModel : ObservableObject
         };
     }
 
+    // ═══════════════ VOICE CALL ═══════════════
+
+    private static string RecordingsFolder
+    {
+        get
+        {
+            var folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Recordings");
+            if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+            return folder;
+        }
+    }
+
+    [RelayCommand]
+    private async Task MakeCallAsync()
+    {
+        if (SelectedCallSim == null)
+        {
+            CallStatus = "⚠️ Chưa chọn SIM";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(CallDestNumber))
+        {
+            CallStatus = "⚠️ Chưa nhập số gọi đến";
+            return;
+        }
+        if (CallDurationSeconds <= 0) CallDurationSeconds = 30;
+
+        IsCalling = true;
+        CallElapsedSeconds = 0;
+        RecordingStatus = "";
+        _callCts = new CancellationTokenSource();
+        var ct = _callCts.Token;
+        var sim = SelectedCallSim;
+        var dest = CallDestNumber;
+        var duration = CallDurationSeconds;
+        var recordEnabled = EnableRecording;
+
+        var callRecord = new CallRecord
+        {
+            ComPort = sim.ComPort,
+            PhoneNumber = sim.PhoneNumber,
+            DestNumber = dest,
+            TargetDurationSec = duration,
+            RecordingEnabled = recordEnabled,
+            State = CallState.Dialing,
+        };
+
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            CallHistory.Insert(0, callRecord);
+            while (CallHistory.Count > 100) CallHistory.RemoveAt(CallHistory.Count - 1);
+        });
+
+        try
+        {
+            await Task.Run(async () =>
+            {
+                // 1. Mở COM port
+                var helper = new AtCommandHelper(sim.ComPort, Settings.BaudRate);
+                _activeCallHelper = helper;
+
+                if (!helper.Open())
+                {
+                    UpdateCallUI(callRecord, CallState.Failed, "❌ Không thể mở " + sim.ComPort);
+                    return;
+                }
+
+                if (!helper.IsAlive())
+                {
+                    UpdateCallUI(callRecord, CallState.Failed, "❌ Modem không phản hồi");
+                    helper.Dispose();
+                    return;
+                }
+
+                // 2. Gọi điện
+                UpdateCallUI(callRecord, CallState.Dialing, $"📞 Đang gọi {dest}...");
+
+                if (!helper.MakeVoiceCall(dest))
+                {
+                    UpdateCallUI(callRecord, CallState.Failed, "❌ Gọi thất bại");
+                    helper.Dispose();
+                    return;
+                }
+
+                // 3. Poll trạng thái — đợi bắt máy hoặc timeout 45s
+                UpdateCallUI(callRecord, CallState.Ringing, "🔔 Đang đổ chuông...");
+                var ringStart = DateTime.Now;
+                bool answered = false;
+
+                while (!ct.IsCancellationRequested)
+                {
+                    await Task.Delay(1000, ct);
+                    var status = helper.GetCallStatus();
+
+                    if (status == 0) // Active = bắt máy
+                    {
+                        answered = true;
+                        break;
+                    }
+                    else if (status == -1) // No call = đã kết thúc
+                    {
+                        // Check NO CARRIER / BUSY
+                        UpdateCallUI(callRecord, CallState.NoAnswer, "❌ Không ai bắt máy");
+                        helper.Dispose();
+                        return;
+                    }
+
+                    // Timeout 45s không bắt máy
+                    if ((DateTime.Now - ringStart).TotalSeconds >= 45)
+                    {
+                        UpdateCallUI(callRecord, CallState.NoAnswer, "❌ 45s không bắt máy - tự động tắt");
+                        helper.HangUp();
+                        helper.Dispose();
+                        return;
+                    }
+                }
+
+                if (ct.IsCancellationRequested)
+                {
+                    helper.HangUp();
+                    helper.Dispose();
+                    return;
+                }
+
+                // 4. Đã bắt máy!
+                callRecord.AnsweredAt = DateTime.Now;
+                UpdateCallUI(callRecord, CallState.Active, "🟢 Đã bắt máy!");
+
+                // 5. Bắt đầu ghi âm (nếu enabled)
+                bool recordingStarted = false;
+                string modemRecFile = "call_rec.amr";
+                if (recordEnabled)
+                {
+                    Application.Current.Dispatcher.Invoke(() => RecordingStatus = "🔴 Đang ghi âm...");
+                    recordingStarted = helper.StartCallRecording(modemRecFile, duration + 5);
+                    if (!recordingStarted)
+                    {
+                        Application.Current.Dispatcher.Invoke(() =>
+                            RecordingStatus = "⚠️ Modem không hỗ trợ ghi âm");
+                    }
+                }
+
+                // 6. Đếm thời gian cuộc gọi (từ lúc bắt máy)
+                var callStart = DateTime.Now;
+                while (!ct.IsCancellationRequested)
+                {
+                    await Task.Delay(1000, ct);
+                    var elapsed = (int)(DateTime.Now - callStart).TotalSeconds;
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        CallElapsedSeconds = elapsed;
+                        CallStatus = $"🟢 Đang gọi... {elapsed}/{duration}s";
+                    });
+
+                    // Check cuộc gọi còn active không
+                    var cStatus = helper.GetCallStatus();
+                    if (cStatus == -1) // Đối phương cúp
+                    {
+                        callRecord.ActualDurationSec = elapsed;
+                        break;
+                    }
+
+                    // Hết thời gian
+                    if (elapsed >= duration)
+                    {
+                        callRecord.ActualDurationSec = elapsed;
+                        break;
+                    }
+                }
+
+                // 7. Cúp máy
+                helper.HangUp();
+                UpdateCallUI(callRecord, CallState.Ended, "✅ Đã kết thúc cuộc gọi");
+                callRecord.EndedAt = DateTime.Now;
+                if (callRecord.ActualDurationSec == 0)
+                    callRecord.ActualDurationSec = (int)(DateTime.Now - callStart).TotalSeconds;
+
+                // 8. Dừng ghi âm + tải file
+                if (recordingStarted)
+                {
+                    Application.Current.Dispatcher.Invoke(() => RecordingStatus = "⏹️ Đang dừng ghi âm...");
+                    helper.StopCallRecording();
+                    await Task.Delay(1000); // Đợi modem lưu file
+
+                    // Download file
+                    Application.Current.Dispatcher.Invoke(() =>
+                        RecordingStatus = "📥 Đang tải file ghi âm...");
+
+                    var data = helper.DownloadRecordingFile(modemRecFile, 30000);
+                    if (data != null && data.Length > 0)
+                    {
+                        var localFile = Path.Combine(RecordingsFolder,
+                            $"call_{sim.ComPort}_{DateTime.Now:yyyyMMdd_HHmmss}.amr");
+                        await File.WriteAllBytesAsync(localFile, data);
+                        callRecord.RecordingPath = localFile;
+
+                        Application.Current.Dispatcher.Invoke(() =>
+                            RecordingStatus = $"✅ Ghi âm đã lưu ({data.Length / 1024}KB)");
+
+                        // Cleanup modem
+                        helper.DeleteModemFile(modemRecFile);
+                    }
+                    else
+                    {
+                        Application.Current.Dispatcher.Invoke(() =>
+                            RecordingStatus = "⚠️ Không tải được file ghi âm");
+                    }
+                }
+
+                helper.Dispose();
+                _activeCallHelper = null;
+
+                // Update call record in history
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    var idx = CallHistory.IndexOf(callRecord);
+                    if (idx >= 0)
+                    {
+                        CallHistory[idx] = callRecord; // Trigger UI update
+                    }
+                });
+
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateCallUI(callRecord, CallState.Ended, "⏹️ Cuộc gọi đã hủy");
+        }
+        catch (Exception ex)
+        {
+            UpdateCallUI(callRecord, CallState.Failed, $"❌ Lỗi: {ex.Message}");
+            Logger.Error($"MakeCall error: {ex.Message}");
+        }
+        finally
+        {
+            IsCalling = false;
+            _callCts?.Dispose();
+            _callCts = null;
+        }
+    }
+
+    private void UpdateCallUI(CallRecord record, CallState state, string statusText)
+    {
+        record.State = state;
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            CallStatus = statusText;
+            CallStatusIcon = record.StateIcon;
+
+            // Refresh record in history
+            var idx = CallHistory.IndexOf(record);
+            if (idx >= 0)
+            {
+                CallHistory[idx] = record;
+            }
+        });
+    }
+
+    [RelayCommand]
+    private void HangUpCall()
+    {
+        _callCts?.Cancel();
+        try
+        {
+            _activeCallHelper?.HangUp();
+            _activeCallHelper?.Dispose();
+            _activeCallHelper = null;
+        }
+        catch { }
+        CallStatus = "⏹️ Đã cúp máy";
+        CallStatusIcon = "☎️";
+        IsCalling = false;
+    }
+
+    [RelayCommand]
+    private void OpenRecording(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ Không mở được file: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void PlayRecording(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        // Set MediaSource để WPF MediaElement play
+        MediaSource = new Uri(path, UriKind.Absolute);
+    }
+
     public void Cleanup()
     {
         Logger.Info("GSM Agent shutting down...");
 
+        // Hang up any active call
+        try
+        {
+            _callCts?.Cancel();
+            _activeCallHelper?.HangUp();
+            _activeCallHelper?.Dispose();
+        }
+        catch { }
+
         // 🛑 Shutdown handler: set INACTIVE tất cả SIM trong MongoDB
-        // Giống SimShutdownHandler.java
         _simSyncService?.OnShutdown();
 
         _simSyncService?.Dispose();
