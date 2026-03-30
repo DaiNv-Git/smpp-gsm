@@ -115,24 +115,27 @@ public class ModemWorker : IDisposable
                 if (_urcSupported)
                     hasNewSms = _helper.CheckForNewSms();
 
-                // 🔥 Simulated URC: chỉ scan khi SMS count THỰC SỰ thay đổi
+                // 🔥 Simulated URC: scan khi có BẤT KỲ SMS nào trong storage
+                // Fix race condition: cũ so sánh count != lastCount → bỏ lỡ khi SMS đến
+                // trong lúc ReadIncomingSms() đang chạy (count giữ nguyên sau delete+arrive)
                 if (!hasNewSms &&
                     (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= SmsScanIntervalMs)
                 {
                     _lastSmsCountCheck = DateTime.Now;
                     var currentCount = _helper.GetSmsCount();
-                    if (currentCount > 0 && currentCount != _lastSmsCount)
+                    if (currentCount > 0)
                     {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"📬 [{_sim.ComPort}] SMS count changed: {_lastSmsCount} → {currentCount}");
+                        // Luôn trigger scan khi storage có SMS — duplicate cache
+                        // sẽ skip SMS đã xử lý, periodic cleanup xóa SMS cũ
+                        if (currentCount != _lastSmsCount)
+                            System.Diagnostics.Debug.WriteLine(
+                                $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
                         _lastSmsCount = currentCount;
                         hasNewSms = true;
                     }
                     else if (_lastSmsCount == -1)
                     {
-                        // First boot: scan 1 lần
                         _lastSmsCount = currentCount;
-                        hasNewSms = currentCount > 0;
                     }
                 }
 
@@ -141,10 +144,16 @@ public class ModemWorker : IDisposable
                     ReadIncomingSms();
                 }
 
-                // Process send queue
-                if (_queue.TryTake(out var task, 500, _cts.Token))
+                // Process send queue — giảm block time từ 500ms → 100ms
+                // để poll incoming SMS thường xuyên hơn
+                if (_queue.TryTake(out var task, 100, _cts.Token))
                 {
                     ProcessSmsTask(task);
+
+                    // 🔥 Check incoming SMS ngay sau khi gửi xong (không đợi poll cycle tiếp)
+                    // Fix: cũ block 30s+ khi gửi → bỏ lỡ incoming SMS
+                    if (_urcSupported && _helper.CheckForNewSms())
+                        ReadIncomingSms();
                 }
             }
             catch (OperationCanceledException)
@@ -419,18 +428,16 @@ public class ModemWorker : IDisposable
                     _helper.DeleteSms(index);
             }
 
-            foreach (var storage in scannedStorages)
-            {
-                if (EnsureStorage(storage))
-                    _helper.CleanupReadSms();
-            }
+            // 🔥 Bỏ CleanupReadSms() sau mỗi scan — chỉ giữ periodic cleanup (mỗi 20 scans)
+            // Fix: AT+CMGD=1,3 có thể xóa SMS mới đến trong lúc đang scan
 
-            // Update simulated URC count after processing
+            // Luôn update count baseline sau scan (không chỉ khi processedCount > 0)
+            // để tránh race condition khi SMS mới đến đúng lúc scan
+            _lastSmsCount = Math.Max(0, _helper.GetSmsCount());
             if (processedCount > 0)
             {
-                _lastSmsCount = _helper.GetSmsCount();
                 System.Diagnostics.Debug.WriteLine(
-                    $"✅ [{_sim.ComPort}] Processed {processedCount}/{allMessages.Count} SMS");
+                    $"✅ [{_sim.ComPort}] Processed {processedCount}/{allMessages.Count} SMS (remaining: {_lastSmsCount})");
             }
         }
         catch (Exception ex)

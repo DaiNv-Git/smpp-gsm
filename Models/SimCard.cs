@@ -1,3 +1,5 @@
+using System.Linq;
+
 namespace GsmAgent.Models;
 
 public class SimCard
@@ -54,6 +56,47 @@ public class SimCard
         { Status: SimStatus.Offline } => "🔴 Offline",
         _ => "⚪ Unknown"
     };
+
+    /// <summary>Trạng thái text thuần (không emoji) — cho bảng kiểu Dangs Modem.</summary>
+    public string StatusText => this switch
+    {
+        { IsBlocked: true } => "Bị chặn",
+        { IsRateLimited: true } => "Giới hạn",
+        { Status: SimStatus.Online } => "Hoạt động",
+        { Status: SimStatus.Busy } => "Đang gửi",
+        { Status: SimStatus.Offline } => "Chưa kết nối",
+        { Status: SimStatus.Error } => "Lỗi",
+        _ => "Ổn định"
+    };
+
+    /// <summary>Slot hiển thị dựa trên COM port number (COM33 → 1/31).</summary>
+    public string SlotDisplay
+    {
+        get
+        {
+            var digits = new string(ComPort.Where(char.IsDigit).ToArray());
+            if (int.TryParse(digits, out var num) && num > 0)
+            {
+                // Dự đoán: SIM slot = (port - base) / 2 + 1, chuẩn modem pool 8/16/32 port
+                return $"1/{(num % 2 == 0 ? "2G" : "4G")}";
+            }
+            return "";
+        }
+    }
+
+    /// <summary>Quốc gia dựa trên IMSI prefix.</summary>
+    public string CountryDisplay
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Imsi)) return "";
+            if (Imsi.StartsWith("440") || Imsi.StartsWith("441")) return "🇯🇵 Nhật Bản";
+            if (Imsi.StartsWith("452")) return "🇻🇳 Việt Nam";
+            if (Imsi.StartsWith("310") || Imsi.StartsWith("311")) return "🇺🇸 Mỹ";
+            if (Imsi.StartsWith("460")) return "🇨🇳 Trung Quốc";
+            return Imsi[..3];
+        }
+    }
 
     public string DailyCountDisplay => $"{DailySentCount}/{DailyLimit}";
 

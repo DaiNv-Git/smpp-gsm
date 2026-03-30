@@ -2,9 +2,9 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:GsmAgent.Views"
-    Title="SMS Global" Height="850" Width="700"
+    Title="SMS Global" Height="750" Width="1280"
     Icon="Assets/logo.png"
-    MinHeight="650" MinWidth="580"
+    MinHeight="600" MinWidth="900"
     WindowStartupLocation="CenterScreen"
     ResizeMode="CanResizeWithGrip"
     Background="{StaticResource BgPrimaryBrush}">
@@ -322,29 +322,53 @@
                             FontSize="10" Margin="8,0,0,0"/>
                     </Grid>
 
-                    <!-- SIM DataGrid -->
+                    <!-- SIM DataGrid — kiểu bảng Dangs Modem -->
                     <Border Grid.Row="1" CornerRadius="8" BorderThickness="1"
                         BorderBrush="{StaticResource BorderSubtleBrush}"
                         Background="{StaticResource BgSecondaryBrush}">
                         <DataGrid ItemsSource="{Binding SimList}" AutoGenerateColumns="False"
                             IsReadOnly="True" Background="Transparent"
                             Foreground="{StaticResource TextPrimaryBrush}" BorderThickness="0"
-                            GridLinesVisibility="None"
+                            GridLinesVisibility="Horizontal"
+                            HorizontalGridLinesBrush="#18ffffff"
                             RowStyle="{StaticResource ModernDataGridRow}"
                             CellStyle="{StaticResource ModernDataGridCell}"
                             ColumnHeaderStyle="{StaticResource ModernColumnHeader}"
-                            HeadersVisibility="Column" FontSize="11.5" RowHeight="32"
-                            SelectionMode="Single" SelectionUnit="FullRow"
-                            CanUserSortColumns="True">
+                            HeadersVisibility="Column" FontSize="11" RowHeight="30"
+                            SelectionMode="Extended" SelectionUnit="FullRow"
+                            CanUserSortColumns="True"
+                            CanUserReorderColumns="True"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Auto">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="COM" Binding="{Binding ComPort}" Width="60"/>
-                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding StatusDisplay}" Width="70"/>
-                                <DataGridTextColumn Header="Số điện thoại" Binding="{Binding PhoneNumber}" Width="110"/>
-                                <DataGridTextColumn Header="Nhà mạng" Binding="{Binding Provider}" Width="85"/>
-                                <DataGridTextColumn Header="Sóng" Binding="{Binding SignalDisplay}" Width="50"/>
-                                <DataGridTextColumn Header="Gửi" Binding="{Binding DailyCountDisplay}" Width="55"/>
-                                <DataGridTextColumn Header="Fail" Binding="{Binding TotalFailed}" Width="40"/>
-                                <DataGridTextColumn Header="Q" Binding="{Binding QueueSize}" Width="35"/>
+                                <DataGridCheckBoxColumn Width="30"/>
+                                <DataGridTextColumn Header="Cổng" Binding="{Binding ComPort}" Width="65"
+                                    SortDirection="Ascending"/>
+                                <DataGridTextColumn Header="Slot" Binding="{Binding SlotDisplay}" Width="55"/>
+                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding StatusText}" Width="80"/>
+                                <DataGridTextColumn Header="Số điện thoại" Binding="{Binding PhoneNumber}" Width="120"/>
+                                <DataGridTextColumn Header="Quốc gia" Binding="{Binding CountryDisplay}" Width="75"/>
+                                <DataGridTextColumn Header="Nhà mạng" Binding="{Binding Provider}" Width="130"/>
+                                <DataGridTextColumn Header="CCID" Binding="{Binding Ccid}" Width="175"/>
+                                <DataGridTextColumn Header="IMSI" Binding="{Binding Imsi}" Width="130"/>
+                                <DataGridTextColumn Header="Tín hiệu" Binding="{Binding SignalDisplay}" Width="60"/>
+                                <DataGridTextColumn Header="Gửi OK" Binding="{Binding DailyCountDisplay}" Width="70">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource AccentGreenBrush}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Gửi lỗi" Binding="{Binding TotalFailed}" Width="55">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource AccentRedBrush}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Hàng đợi" Binding="{Binding QueueSize}" Width="60"/>
                             </DataGrid.Columns>
                         </DataGrid>
                     </Border>
@@ -767,18 +791,41 @@
         </TabControl>
 
         <!-- ═══════════════ STATUS BAR ═══════════════ -->
-        <Border Grid.Row="3" Padding="14,6" BorderThickness="0,1,0,0"
+        <Border Grid.Row="3" Padding="14,5" BorderThickness="0,1,0,0"
             BorderBrush="{StaticResource BorderSubtleBrush}"
             Background="{StaticResource BgSecondaryBrush}">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}"
+
+                <!-- Scan summary -->
+                <TextBlock Grid.Column="0" VerticalAlignment="Center" FontSize="10.5"
+                    Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,16,0">
+                    <Run Text="Cổng (đã chọn/tổng): "/>
+                    <Run Text="{Binding OnlineSimCount, Mode=OneWay}" FontWeight="SemiBold"
+                        Foreground="{StaticResource AccentBlueBrush}"/>
+                    <Run Text="/"/>
+                    <Run Text="{Binding SimList.Count, Mode=OneWay}"/>
+                    <Run Text="  |  Số: "/>
+                    <Run Text="{Binding OnlineSimCount, Mode=OneWay}" FontWeight="SemiBold"
+                        Foreground="{StaticResource AccentGreenBrush}"/>
+                </TextBlock>
+
+                <!-- Scan Status -->
+                <TextBlock Grid.Column="1" Text="{Binding ScanStatus}"
+                    Foreground="{StaticResource TextMutedBrush}" FontSize="10"
+                    VerticalAlignment="Center" Margin="0,0,12,0"/>
+
+                <!-- Status Message -->
+                <TextBlock Grid.Column="2" Text="{Binding StatusMessage}"
                     Foreground="{StaticResource TextSecondaryBrush}" FontSize="10.5"
                     TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="v1.0" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
                 </StackPanel>
             </Grid>
