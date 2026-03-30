@@ -331,7 +331,6 @@
                             Foreground="{StaticResource TextPrimaryBrush}" BorderThickness="0"
                             GridLinesVisibility="Horizontal"
                             HorizontalGridLinesBrush="#18ffffff"
-                            RowStyle="{StaticResource ModernDataGridRow}"
                             CellStyle="{StaticResource ModernDataGridCell}"
                             ColumnHeaderStyle="{StaticResource ModernColumnHeader}"
                             HeadersVisibility="Column" FontSize="11" RowHeight="30"
@@ -340,6 +339,46 @@
                             CanUserReorderColumns="True"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto">
+                            <!-- Row Style: SIM sống = xanh, đang gửi = vàng, lỗi = đỏ -->
+                            <DataGrid.RowStyle>
+                                <Style TargetType="DataGridRow">
+                                    <Setter Property="Background" Value="Transparent"/>
+                                    <Setter Property="BorderThickness" Value="0"/>
+                                    <Setter Property="Margin" Value="0"/>
+                                    <Setter Property="Padding" Value="0"/>
+                                    <Style.Triggers>
+                                        <!-- 🟢 Online = xanh lá -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Hoạt động">
+                                            <Setter Property="Background" Value="#1a3fb950"/>
+                                            <Setter Property="Foreground" Value="#c8f0d4"/>
+                                        </DataTrigger>
+                                        <!-- 🟡 Đang gửi = vàng -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Đang gửi">
+                                            <Setter Property="Background" Value="#1ad29922"/>
+                                            <Setter Property="Foreground" Value="#f0e8c8"/>
+                                        </DataTrigger>
+                                        <!-- 🔴 Bị chặn = đỏ -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Bị chặn">
+                                            <Setter Property="Background" Value="#1af85149"/>
+                                        </DataTrigger>
+                                        <!-- ⛔ Giới hạn = đỏ nhạt -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Giới hạn">
+                                            <Setter Property="Background" Value="#12f85149"/>
+                                        </DataTrigger>
+                                        <!-- Lỗi = đỏ -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Lỗi">
+                                            <Setter Property="Background" Value="#18f85149"/>
+                                        </DataTrigger>
+                                        <!-- Hover -->
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#2258a6ff"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="#2858a6ff"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.RowStyle>
                             <DataGrid.Columns>
                                 <DataGridCheckBoxColumn Width="30"/>
                                 <DataGridTextColumn Header="Cổng" Binding="{Binding ComPort}" Width="65"
