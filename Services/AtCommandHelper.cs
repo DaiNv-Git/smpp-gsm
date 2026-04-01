@@ -610,17 +610,46 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
-    /// <summary>Lấy số SMS hiện tại trong storage (Simulated URC).</summary>
+    /// <summary>Lấy tổng số SMS trong cả ME + SM storage.</summary>
     public int GetSmsCount()
     {
+        int total = 0;
         try
         {
             var resp = SendAndRead("AT+CPMS?", 1000);
-            var match = Regex.Match(resp, @"\+CPMS:\s*""[^""]*"",(\d+),(\d+)");
-            if (match.Success)
-                return int.Parse(match.Groups[1].Value);
+            // +CPMS: "ME",2,50,"ME",2,50,"ME",2,50
+            // Lấy tất cả count từ response (mỗi storage 1 cặp used,max)
+            var matches = Regex.Matches(resp, @"""[^""]*"",\s*(\d+),\s*(\d+)");
+            foreach (Match m in matches)
+            {
+                if (int.TryParse(m.Groups[1].Value, out var count))
+                {
+                    total += count;
+                    break; // Chỉ lấy storage đầu tiên (read storage)
+                }
+            }
+
+            // Nếu parse được từ +CPMS?, return luôn
+            if (matches.Count > 0)
+                return total;
+
+            // Fallback: thử check từng storage riêng
+            foreach (var storage in new[] { "ME", "SM" })
+            {
+                if (SetStorage(storage))
+                {
+                    resp = SendAndRead("AT+CPMS?", 1000);
+                    var m2 = Regex.Match(resp, @"""[^""]*"",\s*(\d+),\s*(\d+)");
+                    if (m2.Success && int.TryParse(m2.Groups[1].Value, out var c))
+                        total += c;
+                }
+            }
+            return total;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ GetSmsCount error: {ex.Message}");
+        }
         return -1;
     }
 
@@ -638,53 +667,64 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
-    /// <summary>Set text mode + UCS2 charset — gọi trước khi ListUnreadSms.
-    /// UCS2 charset để modem trả content tiếng Nhật/Trung/Việt dạng hex (decode được).
-    /// AT command keywords như "REC UNREAD" không bị ảnh hưởng bởi CSCS.</summary>
+    /// <summary>Set text mode — gọi trước khi ListUnreadSms.
+    /// Dùng UCS2 charset để modem trả content tiếng Nhật/Trung/Việt dạng hex.</summary>
     public void PrepareForRead()
     {
         try
         {
             SendAndRead("AT+CMGF=1", 500);
+            // 🔥 Set UCS2 TRƯỚC để modem trả content dạng hex (decode được)
+            // Nhưng AT+CMGL status filter vẫn dùng ASCII (đa số modem chấp nhận)
             SendAndRead("AT+CSCS=\"UCS2\"", 500);
         }
         catch { }
     }
 
-    /// <summary>Đọc SMS UNREAD only (giống Java: listUnreadSmsText).</summary>
+    /// <summary>Đọc SMS UNREAD only — thử nhiều format để tương thích đa số modem.</summary>
     public List<(int index, string sender, string content, DateTime time)> ListUnreadSms(int timeoutMs = 5000)
     {
         var messages = new List<(int, string, string, DateTime)>();
         try
         {
-            // Khi CSCS=UCS2, mọi chuỗi text trong ngoặc kép phải ở dạng UCS2 hex.
-            // "REC UNREAD" -> "00520045004300200055004E0052004500410044"
-            string unreadHex = EncodeUcs2("REC UNREAD");
-            var resp = SendAndRead($"AT+CMGL=\"{unreadHex}\"", timeoutMs);
-            
-            if (resp.Contains("ERROR") || string.IsNullOrWhiteSpace(resp))
-            {
-                // Fallback 1: Thử integer '0' (0 = REC UNREAD trong PDU mode nhưng nhiều modem text mode hỗ trợ)
-                resp = SendAndRead("AT+CMGL=0", timeoutMs);
-            }
+            // 🔥 FIX: Ưu tiên ASCII "REC UNREAD" — đa số modem chấp nhận dù CSCS=UCS2
+            // (Cách cũ encode UCS2 hex cho status filter → hầu hết modem trả ERROR)
+            var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
+            System.Diagnostics.Debug.WriteLine(
+                $"📬 ListUnreadSms [REC UNREAD]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
 
-            if (resp.Contains("ERROR") || (string.IsNullOrWhiteSpace(resp) && !resp.Contains("+CMGL")))
+            if (!resp.Contains("+CMGL"))
             {
-                // Fallback 2: Thử đọc "ALL" bằng UCS2 hex ("ALL" -> 0041004C004C) 
-                resp = SendAndRead($"AT+CMGL=\"{EncodeUcs2("ALL")}\"", timeoutMs);
-            }
-
-            if (resp.Contains("ERROR") || (string.IsNullOrWhiteSpace(resp) && !resp.Contains("+CMGL")))
-            {
-                // Fallback 3: Thử đọc "ALL" bằng ASCII thường (nhiều modem bỏ qua CSCS cho chữ ALL)
+                // Fallback 1: Thử "ALL" ASCII — đọc tất cả (duplicate cache sẽ skip SMS đã xử lý)
                 resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
+                System.Diagnostics.Debug.WriteLine(
+                    $"📬 ListUnreadSms [ALL]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
+            }
+
+            if (!resp.Contains("+CMGL"))
+            {
+                // Fallback 2: Thử integer 4 = ALL messages (dùng cho một số modem cũ)
+                resp = SendAndRead("AT+CMGL=4", timeoutMs);
+                System.Diagnostics.Debug.WriteLine(
+                    $"📬 ListUnreadSms [4]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
+            }
+
+            if (!resp.Contains("+CMGL"))
+            {
+                // Fallback 3: UCS2-encoded "REC UNREAD" (cho modem yêu cầu strict UCS2)
+                string unreadHex = EncodeUcs2("REC UNREAD");
+                resp = SendAndRead($"AT+CMGL=\"{unreadHex}\"", timeoutMs);
+                System.Diagnostics.Debug.WriteLine(
+                    $"📬 ListUnreadSms [UCS2 REC UNREAD]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
             }
 
             ParseCmglResponse(resp, messages);
+            System.Diagnostics.Debug.WriteLine(
+                $"📬 ListUnreadSms result: {messages.Count} messages parsed");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"⚠️ ListUnreadSms failed: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"❌ ListUnreadSms failed: {ex.Message}");
         }
         return messages;
     }
