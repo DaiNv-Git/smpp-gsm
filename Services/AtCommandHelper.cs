@@ -391,54 +391,30 @@ public class AtCommandHelper : IDisposable
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
 
-                var cmgfResp = SendAndRead("AT+CMGF=1", 500);
-
-                // 🔥 Kiểm tra SMSC — nếu chưa set thì tin nhắn sẽ không đến được
-                var smsc = GetSmsc();
-                if (string.IsNullOrWhiteSpace(smsc))
-                {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"⚠️ SendSms: SMSC chưa set! Đang auto-detect...");
-                    EnsureSmscConfigured();
-                    smsc = GetSmsc();
-                }
-                System.Diagnostics.Debug.WriteLine($"📡 SMSC: {smsc ?? "KHÔNG CÓ — SMS có thể không gửi được!"}");
+                SendAndRead("AT+CMGF=1", 500);
 
                 string cmgsDest;
                 string actualContent;
 
-                // AT+CSMP first octet = 49 (0x31):
-                //   bit 0-1: TP-MTI = 01 (SMS-SUBMIT)
-                //   bit 3-4: TP-VPF = 10 (relative validity period)
-                //   bit 5:   TP-SRR = 1  (request delivery report)
-                // Validity period 167 ≈ 1 ngày
                 if (isUnicode)
                 {
-                    // 🔥 Unicode: CSCS=UCS2
-                    var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 500);
-                    var csmpResp = SendAndRead("AT+CSMP=49,167,0,8", 500);
-                    // LƯU Ý: Tuyệt đối không encode UCS2 cho destNumber vì đa số modem hiện đại
-                    // vẫn nhận ASCII format gốc (+81...) cho tham số <da> của AT+CMGS dù CSCS=UCS2.
-                    cmgsDest = normalizedDest; 
+                    SendAndRead("AT+CSCS=\"UCS2\"", 500);
+                    SendAndRead("AT+CSMP=17,167,0,8", 500);
+                    cmgsDest = EncodeUcs2(normalizedDest);
                     actualContent = EncodeUcs2(content);
-                    System.Diagnostics.Debug.WriteLine(
-                        $"📤 SendSms SETUP: unicode=true, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}, SMSC={smsc}");
                 }
                 else
                 {
-                    // ASCII: CSCS=GSM, số ĐT plain text
-                    var cscsResp = SendAndRead("AT+CSCS=\"GSM\"", 500);
-                    var csmpResp = SendAndRead("AT+CSMP=49,167,0,0", 500);
+                    SendAndRead("AT+CSCS=\"GSM\"", 500);
+                    SendAndRead("AT+CSMP=17,167,0,0", 500);
                     cmgsDest = normalizedDest;
                     actualContent = content;
-                    System.Diagnostics.Debug.WriteLine(
-                        $"📤 SendSms SETUP: unicode=false, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}, SMSC={smsc}");
                 }
 
                 System.Diagnostics.Debug.WriteLine(
-                    $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
+                    $"📤 SendSms: dest={normalizedDest}, cmgsDest={cmgsDest}, unicode={isUnicode}, len={content.Length}");
 
-                // Đọc buffer trước, check URC trước khi discard
+                // Check URC trước khi discard buffer
                 if (_port.BytesToRead > 0)
                 {
                     var pending = _port.ReadExisting();
@@ -448,7 +424,7 @@ public class AtCommandHelper : IDisposable
                 _port.DiscardInBuffer();
                 _port.Write($"AT+CMGS=\"{cmgsDest}\"\r");
 
-                // Đợi prompt > với timeout
+                // Đợi prompt >
                 var promptDeadline = DateTime.Now.AddMilliseconds(5000);
                 var promptSb = new StringBuilder();
                 bool gotPrompt = false;
@@ -481,8 +457,11 @@ public class AtCommandHelper : IDisposable
                     return false;
                 }
 
-                // Gửi content + Ctrl+Z (0x1A) gộp làm 1 để modem không bị stall
-                _port.Write(actualContent + (char)26);
+                // Gửi content
+                _port.Write(actualContent);
+                Thread.Sleep(300);
+                // Gửi Ctrl+Z (0x1A) dạng raw byte
+                _port.Write(new byte[] { 0x1A }, 0, 1);
 
                 // Wait for result
                 var sb = new StringBuilder();
@@ -499,23 +478,9 @@ public class AtCommandHelper : IDisposable
 
                         if (result.Contains("OK"))
                         {
-                            var cleanResult = result.Replace("\r", " ").Replace("\n", " ").Trim();
-                            if (gotCmgs)
-                            {
-                                // ✅ Chuẩn: có +CMGS: <mr> + OK → network đã chấp nhận tin nhắn
-                                var mrMatch = Regex.Match(result, @"\+CMGS:\s*(\d+)");
-                                var mr = mrMatch.Success ? mrMatch.Groups[1].Value : "?";
-                                System.Diagnostics.Debug.WriteLine(
-                                    $"✅ SendSms OK to {normalizedDest} (MR={mr}, unicode={isUnicode}) | Response: {cleanResult}");
-                                return true;
-                            }
-                            else
-                            {
-                                // ⚠️ Modem trả OK nhưng KHÔNG có +CMGS: → tin nhắn có thể chưa thực sự gửi đi
-                                System.Diagnostics.Debug.WriteLine(
-                                    $"⚠️ SendSms: modem trả OK nhưng thiếu +CMGS: → coi là FAIL | dest={normalizedDest} | Response: {cleanResult}");
-                                return false;
-                            }
+                            System.Diagnostics.Debug.WriteLine(
+                                $"✅ SendSms OK to {normalizedDest} (gotCmgs={gotCmgs}) | {result.Replace("\r", " ").Replace("\n", " ").Trim()}");
+                            return true;
                         }
                         if (result.Contains("ERROR"))
                         {
@@ -530,8 +495,6 @@ public class AtCommandHelper : IDisposable
                 var finalResult = sb.ToString();
                 System.Diagnostics.Debug.WriteLine(
                     $"⚠️ SendSms timeout (gotCmgs={gotCmgs}): {finalResult.Replace("\r", " ").Replace("\n", " ")}");
-
-                // Nếu timeout nhưng đã có +CMGS: → có thể modem chậm trả OK, coi là thành công
                 return gotCmgs;
             }
             catch (Exception ex)
@@ -841,10 +804,6 @@ public class AtCommandHelper : IDisposable
         // 81xxx (country code Nhật, thiếu +) → thêm + để modem hiểu đúng international
         if (phone.StartsWith("81") && !phone.StartsWith("+") && phone.Length >= 11)
             phone = "+" + phone;
-        // 070, 080, 090 (local Nhật) → chuyển sang +81 để đảm bảo SMSC gửi được
-        else if (phone.StartsWith("0") && phone.Length >= 10 && phone.Length <= 11)
-            phone = "+81" + phone.Substring(1);
-
         return phone;
     }
 
