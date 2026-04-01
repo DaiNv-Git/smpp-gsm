@@ -375,14 +375,25 @@ public class AtCommandHelper : IDisposable
     /// <summary>Gửi SMS text mode.</summary>
     public bool SendSms(string destNumber, string content, int timeoutMs = 30000)
     {
+        var logFile = "sms_debug.txt";
         lock (_lock)
         {
             try
             {
                 if (!_port.IsOpen) return false;
+                
+                File.AppendAllText(logFile, $"\n[{DateTime.Now:HH:mm:ss}] START SendSms to {destNumber} (COM: {_port.PortName})\n");
 
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
+
+                // 🔥 Kiểm tra SMSC — nếu chưa set thì tin nhắn sẽ không đến được (có thể do lúc boot SIM chưa ready)
+                var currentSmsc = GetSmsc();
+                if (string.IsNullOrWhiteSpace(currentSmsc))
+                {
+                    System.Diagnostics.Debug.WriteLine("⚠️ SendSms: SMSC chưa set! Đang auto-detect...");
+                    EnsureSmscConfigured();
+                }
 
                 SendAndRead("AT+CMGF=1", 500);
 
@@ -417,6 +428,7 @@ public class AtCommandHelper : IDisposable
                         _pendingUrc = true;
                 }
                 _port.DiscardInBuffer();
+                File.AppendAllText(logFile, $"WRITE: AT+CMGS=\"{cmgsDest}\"\n");
                 _port.Write($"AT+CMGS=\"{cmgsDest}\"\r");
 
                 // Đợi prompt > với timeout
@@ -427,7 +439,10 @@ public class AtCommandHelper : IDisposable
                 {
                     if (_port.BytesToRead > 0)
                     {
-                        promptSb.Append(_port.ReadExisting());
+                        var chunk = _port.ReadExisting();
+                        promptSb.Append(chunk);
+                        File.AppendAllText(logFile, $"PROMPT READ: {chunk.Replace("\r","\\r").Replace("\n","\\n")}\n");
+                        
                         var promptStr = promptSb.ToString();
                         if (promptStr.Contains(">"))
                         {
@@ -436,8 +451,7 @@ public class AtCommandHelper : IDisposable
                         }
                         if (promptStr.Contains("ERROR"))
                         {
-                            System.Diagnostics.Debug.WriteLine(
-                                $"❌ SendSms: AT+CMGS ERROR: {promptStr}");
+                            File.AppendAllText(logFile, $"ERROR BEFORE PROMPT: {promptStr}\n");
                             return false;
                         }
                     }
@@ -446,8 +460,7 @@ public class AtCommandHelper : IDisposable
 
                 if (!gotPrompt)
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"❌ SendSms: No '>' prompt after 5s (got: {promptSb})");
+                    File.AppendAllText(logFile, $"TIMEOUT: No prompt > after 5s\n");
                     try { _port.Write(new byte[] { 0x1B }, 0, 1); } catch { }
                     return false;
                 }
@@ -456,6 +469,7 @@ public class AtCommandHelper : IDisposable
                 _port.Write(actualContent);
                 Thread.Sleep(300);
                 _port.Write(new byte[] { 0x1A }, 0, 1); // Ctrl+Z
+                File.AppendAllText(logFile, $"WRITE CONTENT + CtrlZ\n");
 
                 // Wait for result
                 var sb = new StringBuilder();
@@ -465,7 +479,10 @@ public class AtCommandHelper : IDisposable
                 {
                     if (_port.BytesToRead > 0)
                     {
-                        sb.Append(_port.ReadExisting());
+                        var readStr = _port.ReadExisting();
+                        sb.Append(readStr);
+                        File.AppendAllText(logFile, $"REPLY: {readStr.Replace("\r","\\r").Replace("\n","\\n")}\n");
+                        
                         var result = sb.ToString();
                         if (result.Contains("+CMGS"))
                             gotCmgs = true;
