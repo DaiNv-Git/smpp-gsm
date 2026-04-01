@@ -414,10 +414,12 @@ public class AtCommandHelper : IDisposable
                 // Validity period 167 ≈ 1 ngày
                 if (isUnicode)
                 {
-                    // 🔥 Unicode: CSCS=UCS2, số ĐT cũng phải encode UCS2 hex
+                    // 🔥 Unicode: CSCS=UCS2
                     var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 500);
                     var csmpResp = SendAndRead("AT+CSMP=49,167,0,8", 500);
-                    cmgsDest = EncodeUcs2(normalizedDest);  // "+81..." → "002B003800310030..."
+                    // LƯU Ý: Tuyệt đối không encode UCS2 cho destNumber vì đa số modem hiện đại
+                    // vẫn nhận ASCII format gốc (+81...) cho tham số <da> của AT+CMGS dù CSCS=UCS2.
+                    cmgsDest = normalizedDest; 
                     actualContent = EncodeUcs2(content);
                     System.Diagnostics.Debug.WriteLine(
                         $"📤 SendSms SETUP: unicode=true, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}, SMSC={smsc}");
@@ -479,10 +481,8 @@ public class AtCommandHelper : IDisposable
                     return false;
                 }
 
-                // Gửi content + Ctrl+Z
-                _port.Write(actualContent);
-                Thread.Sleep(300);
-                _port.Write(new byte[] { 0x1A }, 0, 1); // Ctrl+Z
+                // Gửi content + Ctrl+Z (0x1A) gộp làm 1 để modem không bị stall
+                _port.Write(actualContent + (char)26);
 
                 // Wait for result
                 var sb = new StringBuilder();
@@ -801,6 +801,10 @@ public class AtCommandHelper : IDisposable
         // 81xxx (country code Nhật, thiếu +) → thêm + để modem hiểu đúng international
         if (phone.StartsWith("81") && !phone.StartsWith("+") && phone.Length >= 11)
             phone = "+" + phone;
+        // 070, 080, 090 (local Nhật) → chuyển sang +81 để đảm bảo SMSC gửi được
+        else if (phone.StartsWith("0") && phone.Length >= 10 && phone.Length <= 11)
+            phone = "+81" + phone.Substring(1);
+
         return phone;
     }
 
