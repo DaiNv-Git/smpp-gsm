@@ -294,6 +294,72 @@ public class AtCommandHelper : IDisposable
         return -1;
     }
 
+    /// <summary>Lấy số SMSC (SMS Center) hiện tại trên modem.</summary>
+    public string? GetSmsc()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+CSCA?", 1000);
+            var match = Regex.Match(resp, @"\+CSCA:\s*""(\+?[\d]+)""");
+            if (match.Success)
+                return match.Groups[1].Value;
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>Đặt SMSC number cho modem.</summary>
+    public bool SetSmsc(string smscNumber)
+    {
+        try
+        {
+            var resp = SendAndRead($"AT+CSCA=\"{smscNumber}\"", 1000);
+            return resp.Contains("OK");
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Tự detect và set SMSC dựa trên IMSI prefix (nhà mạng Nhật).</summary>
+    public bool EnsureSmscConfigured()
+    {
+        var currentSmsc = GetSmsc();
+        if (!string.IsNullOrWhiteSpace(currentSmsc))
+        {
+            System.Diagnostics.Debug.WriteLine($"📡 SMSC đã có: {currentSmsc}");
+            return true;
+        }
+
+        // SMSC chưa set → detect từ IMSI
+        var imsi = GetImsi();
+        var smsc = DetectSmscFromImsi(imsi);
+        if (!string.IsNullOrWhiteSpace(smsc))
+        {
+            System.Diagnostics.Debug.WriteLine($"📡 SMSC chưa set → auto-config: {smsc} (IMSI={imsi})");
+            return SetSmsc(smsc);
+        }
+
+        System.Diagnostics.Debug.WriteLine($"⚠️ SMSC chưa set và không detect được nhà mạng (IMSI={imsi})");
+        return false;
+    }
+
+    /// <summary>Map IMSI prefix → SMSC number cho các nhà mạng Nhật.</summary>
+    private static string? DetectSmscFromImsi(string? imsi)
+    {
+        if (string.IsNullOrWhiteSpace(imsi)) return null;
+        if (imsi.StartsWith("44010")) return "+81903101652";
+        if (imsi.StartsWith("44011")) return "+81903101652";
+        if (imsi.StartsWith("44020") || imsi.StartsWith("44000") ||
+            imsi.StartsWith("44001") || imsi.StartsWith("44002") || imsi.StartsWith("44003"))
+            return "+819066519300";
+        if (imsi.StartsWith("44050") || imsi.StartsWith("44051") ||
+            imsi.StartsWith("44053") || imsi.StartsWith("44054"))
+            return "+81907031903";
+        if (imsi.StartsWith("45204") || imsi.StartsWith("45205")) return "+84988900088";
+        if (imsi.StartsWith("45201")) return "+84909000000";
+        if (imsi.StartsWith("45202")) return "+84911900088";
+        return null;
+    }
+
     /// <summary>Nhận diện nhà mạng từ IMSI — giống detectProvider() trong Java SimSyncService.</summary>
     public static string DetectProvider(string? imsi)
     {
@@ -665,6 +731,9 @@ public class AtCommandHelper : IDisposable
         // 81xxx (country code Nhật, thiếu +) → thêm + để modem hiểu đúng international
         if (phone.StartsWith("81") && !phone.StartsWith("+") && phone.Length >= 11)
             phone = "+" + phone;
+        // 0xxx (local Nhật) → +81xxx
+        if (phone.StartsWith("0") && phone.Length >= 10)
+            phone = "+81" + phone.Substring(1);
         return phone;
     }
 
