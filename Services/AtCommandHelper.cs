@@ -294,6 +294,79 @@ public class AtCommandHelper : IDisposable
         return -1;
     }
 
+    /// <summary>Lấy số SMSC (SMS Center) hiện tại trên modem.</summary>
+    public string? GetSmsc()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+CSCA?", 1000);
+            var match = Regex.Match(resp, @"\+CSCA:\s*""(\+?[\d]+)""");
+            if (match.Success)
+                return match.Groups[1].Value;
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>Đặt SMSC number cho modem.</summary>
+    public bool SetSmsc(string smscNumber)
+    {
+        try
+        {
+            var resp = SendAndRead($"AT+CSCA=\"{smscNumber}\"", 1000);
+            return resp.Contains("OK");
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Tự detect và set SMSC dựa trên IMSI prefix (nhà mạng Nhật).</summary>
+    public bool EnsureSmscConfigured()
+    {
+        var currentSmsc = GetSmsc();
+        if (!string.IsNullOrWhiteSpace(currentSmsc))
+        {
+            System.Diagnostics.Debug.WriteLine($"📡 SMSC đã có: {currentSmsc}");
+            return true;
+        }
+
+        // SMSC chưa set → detect từ IMSI
+        var imsi = GetImsi();
+        var smsc = DetectSmscFromImsi(imsi);
+        if (!string.IsNullOrWhiteSpace(smsc))
+        {
+            System.Diagnostics.Debug.WriteLine($"📡 SMSC chưa set → auto-config: {smsc} (IMSI={imsi})");
+            return SetSmsc(smsc);
+        }
+
+        System.Diagnostics.Debug.WriteLine($"⚠️ SMSC chưa set và không detect được nhà mạng (IMSI={imsi})");
+        return false;
+    }
+
+    /// <summary>Map IMSI prefix → SMSC number cho các nhà mạng Nhật.</summary>
+    private static string? DetectSmscFromImsi(string? imsi)
+    {
+        if (string.IsNullOrWhiteSpace(imsi)) return null;
+        // NTT Docomo
+        if (imsi.StartsWith("44010")) return "+81903101652";
+        // Rakuten Mobile (dùng SMSC của Docomo)
+        if (imsi.StartsWith("44011")) return "+81903101652";
+        // SoftBank / Y!mobile
+        if (imsi.StartsWith("44020") || imsi.StartsWith("44000") ||
+            imsi.StartsWith("44001") || imsi.StartsWith("44002") || imsi.StartsWith("44003"))
+            return "+819066519300";
+        // KDDI/AU
+        if (imsi.StartsWith("44050") || imsi.StartsWith("44051") ||
+            imsi.StartsWith("44053") || imsi.StartsWith("44054"))
+            return "+81907031903";
+        // Viettel (VN)
+        if (imsi.StartsWith("45204") || imsi.StartsWith("45205")) return "+84988900088";
+        // Mobifone (VN)
+        if (imsi.StartsWith("45201")) return "+84909000000";
+        // Vinaphone (VN)
+        if (imsi.StartsWith("45202")) return "+84911900088";
+        return null;
+    }
+
     /// <summary>Nhận diện nhà mạng từ IMSI — giống detectProvider() trong Java SimSyncService.</summary>
     public static string DetectProvider(string? imsi)
     {
@@ -320,28 +393,44 @@ public class AtCommandHelper : IDisposable
 
                 var cmgfResp = SendAndRead("AT+CMGF=1", 500);
 
+                // 🔥 Kiểm tra SMSC — nếu chưa set thì tin nhắn sẽ không đến được
+                var smsc = GetSmsc();
+                if (string.IsNullOrWhiteSpace(smsc))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ SendSms: SMSC chưa set! Đang auto-detect...");
+                    EnsureSmscConfigured();
+                    smsc = GetSmsc();
+                }
+                System.Diagnostics.Debug.WriteLine($"📡 SMSC: {smsc ?? "KHÔNG CÓ — SMS có thể không gửi được!"}");
+
                 string cmgsDest;
                 string actualContent;
 
+                // AT+CSMP first octet = 49 (0x31):
+                //   bit 0-1: TP-MTI = 01 (SMS-SUBMIT)
+                //   bit 3-4: TP-VPF = 10 (relative validity period)
+                //   bit 5:   TP-SRR = 1  (request delivery report)
+                // Validity period 167 ≈ 1 ngày
                 if (isUnicode)
                 {
                     // 🔥 Unicode: CSCS=UCS2, số ĐT cũng phải encode UCS2 hex
                     var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 500);
-                    var csmpResp = SendAndRead("AT+CSMP=17,167,0,8", 500);
+                    var csmpResp = SendAndRead("AT+CSMP=49,167,0,8", 500);
                     cmgsDest = EncodeUcs2(normalizedDest);  // "+81..." → "002B003800310030..."
                     actualContent = EncodeUcs2(content);
                     System.Diagnostics.Debug.WriteLine(
-                        $"📤 SendSms SETUP: unicode=true, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}");
+                        $"📤 SendSms SETUP: unicode=true, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}, SMSC={smsc}");
                 }
                 else
                 {
                     // ASCII: CSCS=GSM, số ĐT plain text
                     var cscsResp = SendAndRead("AT+CSCS=\"GSM\"", 500);
-                    var csmpResp = SendAndRead("AT+CSMP=17,167,0,0", 500);
+                    var csmpResp = SendAndRead("AT+CSMP=49,167,0,0", 500);
                     cmgsDest = normalizedDest;
                     actualContent = content;
                     System.Diagnostics.Debug.WriteLine(
-                        $"📤 SendSms SETUP: unicode=false, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}");
+                        $"📤 SendSms SETUP: unicode=false, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}, SMSC={smsc}");
                 }
 
                 System.Diagnostics.Debug.WriteLine(

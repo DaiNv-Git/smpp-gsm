@@ -82,6 +82,9 @@ public class ModemWorker : IDisposable
             System.Diagnostics.Debug.WriteLine($"⚠️ [{_sim.ComPort}] URC not supported — using Simulated URC (SMS count polling)");
         }
 
+        // 🔥 Đảm bảo SMSC đã được cấu hình — nếu thiếu, SMS sẽ gửi đi nhưng không đến
+        _helper.EnsureSmscConfigured();
+
         IsRunning = true;
         _sim.Status = SimStatus.Online;
         _thread.Start();
