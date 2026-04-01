@@ -318,7 +318,7 @@ public class AtCommandHelper : IDisposable
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
 
-                SendAndRead("AT+CMGF=1", 500);
+                var cmgfResp = SendAndRead("AT+CMGF=1", 500);
 
                 string cmgsDest;
                 string actualContent;
@@ -326,18 +326,22 @@ public class AtCommandHelper : IDisposable
                 if (isUnicode)
                 {
                     // 🔥 Unicode: CSCS=UCS2, số ĐT cũng phải encode UCS2 hex
-                    SendAndRead("AT+CSCS=\"UCS2\"", 500);
-                    SendAndRead("AT+CSMP=17,167,0,8", 500);
+                    var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 500);
+                    var csmpResp = SendAndRead("AT+CSMP=17,167,0,8", 500);
                     cmgsDest = EncodeUcs2(normalizedDest);  // "+81..." → "002B003800310030..."
                     actualContent = EncodeUcs2(content);
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📤 SendSms SETUP: unicode=true, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}");
                 }
                 else
                 {
                     // ASCII: CSCS=GSM, số ĐT plain text
-                    SendAndRead("AT+CSCS=\"GSM\"", 500);
-                    SendAndRead("AT+CSMP=17,167,0,0", 500);
+                    var cscsResp = SendAndRead("AT+CSCS=\"GSM\"", 500);
+                    var csmpResp = SendAndRead("AT+CSMP=17,167,0,0", 500);
                     cmgsDest = normalizedDest;
                     actualContent = content;
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📤 SendSms SETUP: unicode=false, CMGF={cmgfResp.Contains("OK")}, CSCS={cscsResp.Contains("OK")}, CSMP={csmpResp.Contains("OK")}");
                 }
 
                 System.Diagnostics.Debug.WriteLine(
@@ -401,13 +405,28 @@ public class AtCommandHelper : IDisposable
                     {
                         sb.Append(_port.ReadExisting());
                         var result = sb.ToString();
-                        if (result.Contains("+CMGS"))
+                        if (result.Contains("+CMGS:"))
                             gotCmgs = true;
 
                         if (result.Contains("OK"))
                         {
-                            System.Diagnostics.Debug.WriteLine($"✅ SendSms OK to {normalizedDest}");
-                            return true;
+                            var cleanResult = result.Replace("\r", " ").Replace("\n", " ").Trim();
+                            if (gotCmgs)
+                            {
+                                // ✅ Chuẩn: có +CMGS: <mr> + OK → network đã chấp nhận tin nhắn
+                                var mrMatch = Regex.Match(result, @"\+CMGS:\s*(\d+)");
+                                var mr = mrMatch.Success ? mrMatch.Groups[1].Value : "?";
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"✅ SendSms OK to {normalizedDest} (MR={mr}, unicode={isUnicode}) | Response: {cleanResult}");
+                                return true;
+                            }
+                            else
+                            {
+                                // ⚠️ Modem trả OK nhưng KHÔNG có +CMGS: → tin nhắn có thể chưa thực sự gửi đi
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"⚠️ SendSms: modem trả OK nhưng thiếu +CMGS: → coi là FAIL | dest={normalizedDest} | Response: {cleanResult}");
+                                return false;
+                            }
                         }
                         if (result.Contains("ERROR"))
                         {
@@ -423,7 +442,8 @@ public class AtCommandHelper : IDisposable
                 System.Diagnostics.Debug.WriteLine(
                     $"⚠️ SendSms timeout (gotCmgs={gotCmgs}): {finalResult.Replace("\r", " ").Replace("\n", " ")}");
 
-                return false;
+                // Nếu timeout nhưng đã có +CMGS: → có thể modem chậm trả OK, coi là thành công
+                return gotCmgs;
             }
             catch (Exception ex)
             {
