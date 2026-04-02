@@ -148,8 +148,18 @@ public partial class MainViewModel : ObservableObject
                 ScanStatus = $"✅ Scan xong: {sims.Count} SIM";
                 Logger.Info($"Scan hoàn tất: {sims.Count} SIM(s)");
 
-                // 🔗 Report SIM + Device info lên server → lưu DB
+                // 🔗 Report SIM + Device info lên server
                 _serverConnection?.ReportSims();
+
+                // 🔥 Trigger LƯU DB NGAY LẬP TỨC (không đợi 5 phút)
+                if (_simSyncService != null)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try { await _simSyncService.SyncSimsToMongo(); }
+                        catch (Exception ex) { Logger.Error($"Immediate DB Sync error: {ex.Message}"); }
+                    });
+                }
             });
         };
 
