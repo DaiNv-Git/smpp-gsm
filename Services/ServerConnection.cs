@@ -67,6 +67,26 @@ public class ServerConnection : IDisposable
                 LogMessage?.Invoke($"🔄 Đang kết nối lại... (lần {e})");
             };
 
+            // 🔥 Cơ chế "Ngắt mạch" (Circuit Breaker) & Tự động kết nối lại sau 5 phút ngủ đông
+            _socket.OnReconnectFailed += async (s, e) =>
+            {
+                LogMessage?.Invoke("🚨 Đã hết 5 lần thử kết nối (ngắt mạch). App sẽ vào chế độ ngủ và tự động thử lại sau 5 phút...");
+                
+                // Ngủ đông 5 phút (300,000 ms)
+                await Task.Delay(300_000); 
+
+                if (!_disposed)
+                {
+                    LogMessage?.Invoke("🔄 Hết 5 phút nghỉ. Bắt đầu chu kỳ kết nối mới...");
+                    
+                    // Cleanup socket cũ trước khi retry tái sinh
+                    try { await _socket.DisconnectAsync(); _socket.Dispose(); } catch { }
+                    
+                    // Gọi lại hàm ConnectAsync để khởi tạo và thử lại 5 lần nữa
+                    _ = ConnectAsync(); 
+                }
+            };
+
             // Handle sms:send from server
             _socket.On("sms:send", response =>
             {
