@@ -266,7 +266,7 @@ public class SimSyncService : IDisposable
     {
         return new SimDocument
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = MongoDB.Bson.ObjectId.GenerateNewId().ToString(),
             Ccid = sim.Ccid,
             Imsi = sim.Imsi,
             PhoneNumber = !string.IsNullOrWhiteSpace(sim.PhoneNumber)

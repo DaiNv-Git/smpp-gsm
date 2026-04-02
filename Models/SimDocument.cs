@@ -11,8 +11,8 @@ namespace GsmAgent.Models;
 public class SimDocument
 {
     [BsonId]
-    [BsonRepresentation(BsonType.String)]
-    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [BsonRepresentation(BsonType.ObjectId)]
+    public string Id { get; set; } = ObjectId.GenerateNewId().ToString();
 
     [BsonElement("phoneNumber")]
     public string? PhoneNumber { get; set; }
