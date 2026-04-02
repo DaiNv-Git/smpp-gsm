@@ -1,6 +1,7 @@
 using System.IO.Ports;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace GsmAgent.Services;
 
@@ -54,8 +55,9 @@ public class AtCommandHelper : IDisposable
         try { if (_port.IsOpen) _port.Close(); } catch { }
     }
 
-    // 🔥 Flag lưu URC phát hiện trong buffer trước khi DiscardInBuffer
-    private volatile bool _pendingUrc;
+    // 🔥 Counter lưu URC phát hiện trong buffer trước khi DiscardInBuffer
+    // Dùng int + Interlocked thay vì bool để đếm chính xác số URC (nhiều SMS đến cùng lúc)
+    private int _pendingUrcCount;
 
     /// <summary>Gửi AT command và đọc response.</summary>
     public string SendAndRead(string command, int timeoutMs = 2000)
@@ -71,7 +73,7 @@ public class AtCommandHelper : IDisposable
                     var pending = _port.ReadExisting();
                     if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
                     {
-                        _pendingUrc = true;
+                        Interlocked.Increment(ref _pendingUrcCount);
                     }
                 }
                 // LUÔN discard để đảm bảo buffer sạch cho command mới
@@ -90,7 +92,7 @@ public class AtCommandHelper : IDisposable
                         sb.Append(_port.ReadExisting());
                         var resp = sb.ToString();
                         if (resp.Contains("+CMTI:") || resp.Contains("+CMT:"))
-                            _pendingUrc = true;
+                            Interlocked.Increment(ref _pendingUrcCount);
                         if (resp.Contains("OK") || resp.Contains("ERROR"))
                             break;
                     }
@@ -553,7 +555,7 @@ public class AtCommandHelper : IDisposable
                 {
                     var pending = _port.ReadExisting();
                     if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
-                        _pendingUrc = true;
+                        Interlocked.Increment(ref _pendingUrcCount);
                 }
                 _port.DiscardInBuffer();
                 _port.Write($"AT+CMGS=\"{cmgsDest}\"\r");
@@ -704,9 +706,9 @@ public class AtCommandHelper : IDisposable
     public bool CheckForNewSms()
     {
         // 🔥 Check URC đã phát hiện trong SendAndRead (buffer trước khi discard)
-        if (_pendingUrc)
+        // Dùng Interlocked.Exchange để atomic reset counter → không mất URC
+        if (Interlocked.Exchange(ref _pendingUrcCount, 0) > 0)
         {
-            _pendingUrc = false;
             return true;
         }
         if (!_port.IsOpen || _port.BytesToRead == 0) return false;

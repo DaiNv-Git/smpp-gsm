@@ -10,7 +10,7 @@ namespace GsmAgent.Services;
 /// </summary>
 public class ModemWorker : IDisposable
 {
-    private const int SmsScanIntervalMs = 5000;
+    private const int SmsScanIntervalMs = 2000; // 🔥 Giảm từ 5000 → 2000 để phát hiện SMS mới nhanh hơn
     private readonly AtCommandHelper _helper;
     private readonly BlockingCollection<SmsTask> _queue = new(100);
     private readonly CancellationTokenSource _cts = new();
@@ -118,17 +118,20 @@ public class ModemWorker : IDisposable
                 if (_urcSupported)
                     hasNewSms = _helper.CheckForNewSms();
 
-                // 🔥 FIX: Chỉ trigger scan khi count TĂNG — tránh lặp khi delete fail
-                // Cũ: count > 0 → luôn scan → tin xóa fail bị xử lý lại liên tục
+                // 🔥 FIX: Luôn scan khi count > 0 — duplicate được filter bởi _processedSmsCache (TTL 60 phút)
+                // Cũ: count != _lastSmsCount → bỏ sót SMS khi count giữ nguyên (1 đến + 1 xóa cùng lúc)
                 if (!hasNewSms &&
                     (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= SmsScanIntervalMs)
                 {
                     _lastSmsCountCheck = DateTime.Now;
                     var currentCount = _helper.GetSmsCount();
-                    if (currentCount > 0 && currentCount != _lastSmsCount)
+                    if (currentCount > 0)
                     {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
+                        if (currentCount != _lastSmsCount)
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
+                        }
                         _lastSmsCount = currentCount;
                         hasNewSms = true;
                     }
@@ -141,6 +144,19 @@ public class ModemWorker : IDisposable
                 if (hasNewSms)
                 {
                     ReadIncomingSms();
+
+                    // 🔥 Re-check ngay: SMS có thể đến trong lúc đang scan (10s+ dual-storage)
+                    // Loop tối đa 2 lần tránh infinite loop
+                    for (int recheck = 0; recheck < 2; recheck++)
+                    {
+                        if (_helper.CheckForNewSms())
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"📬 [{_sim.ComPort}] Re-check #{recheck + 1}: thêm SMS mới đến trong lúc scan!");
+                            ReadIncomingSms();
+                        }
+                        else break;
+                    }
                 }
 
                 // Process send queue — giảm block time từ 500ms → 100ms
@@ -151,7 +167,7 @@ public class ModemWorker : IDisposable
 
                     // 🔥 Check incoming SMS ngay sau khi gửi xong (không đợi poll cycle tiếp)
                     // Fix: cũ block 30s+ khi gửi → bỏ lỡ incoming SMS
-                    if (_urcSupported && _helper.CheckForNewSms())
+                    if (_helper.CheckForNewSms())
                         ReadIncomingSms();
                 }
             }
@@ -353,7 +369,7 @@ public class ModemWorker : IDisposable
                     }
 
                     scannedStorages.Add(storage);
-                    var smsInStore = _helper.ListUnreadSms(5000);
+                    var smsInStore = _helper.ListUnreadSms(3000); // 🔥 Giảm timeout từ 5000 → 3000ms
 
                     allMessages.AddRange(smsInStore.Select(m => (storage, m.index, m.sender, m.content, m.time)));
                     if (smsInStore.Count > 0)
