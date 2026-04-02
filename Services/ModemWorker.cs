@@ -60,7 +60,7 @@ public class ModemWorker : IDisposable
     // 🔥 Ported from Java PortWorker
     private int _scanCount = 0; // Track scan iterations for periodic cleanup
     private readonly ConcurrentDictionary<string, DateTime> _processedSmsCache = new(); // TTL-based cache
-    private static readonly TimeSpan SmsCacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan SmsCacheTtl = TimeSpan.FromMinutes(60); // 🔥 Tăng từ 5 → 60 phút tránh lặp tin cũ
 
     public bool Start()
     {
@@ -118,27 +118,23 @@ public class ModemWorker : IDisposable
                 if (_urcSupported)
                     hasNewSms = _helper.CheckForNewSms();
 
-                // 🔥 Simulated URC: scan khi có BẤT KỲ SMS nào trong storage
-                // Fix race condition: cũ so sánh count != lastCount → bỏ lỡ khi SMS đến
-                // trong lúc ReadIncomingSms() đang chạy (count giữ nguyên sau delete+arrive)
+                // 🔥 FIX: Chỉ trigger scan khi count TĂNG — tránh lặp khi delete fail
+                // Cũ: count > 0 → luôn scan → tin xóa fail bị xử lý lại liên tục
                 if (!hasNewSms &&
                     (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= SmsScanIntervalMs)
                 {
                     _lastSmsCountCheck = DateTime.Now;
                     var currentCount = _helper.GetSmsCount();
-                    if (currentCount > 0)
+                    if (currentCount > 0 && currentCount != _lastSmsCount)
                     {
-                        // Luôn trigger scan khi storage có SMS — duplicate cache
-                        // sẽ skip SMS đã xử lý, periodic cleanup xóa SMS cũ
-                        if (currentCount != _lastSmsCount)
-                            System.Diagnostics.Debug.WriteLine(
-                                $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
                         _lastSmsCount = currentCount;
                         hasNewSms = true;
                     }
-                    else if (_lastSmsCount == -1)
+                    else if (currentCount == 0 && _lastSmsCount > 0)
                     {
-                        _lastSmsCount = currentCount;
+                        _lastSmsCount = 0; // Reset baseline
                     }
                 }
 

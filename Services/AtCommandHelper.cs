@@ -776,34 +776,42 @@ public class AtCommandHelper : IDisposable
         try
         {
             // 🔥 FIX: Ưu tiên ASCII "REC UNREAD" — đa số modem chấp nhận dù CSCS=UCS2
-            // (Cách cũ encode UCS2 hex cho status filter → hầu hết modem trả ERROR)
             var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
+            bool gotError = resp.Contains("ERROR");
+            bool hasData = resp.Contains("+CMGL");
             System.Diagnostics.Debug.WriteLine(
-                $"📬 ListUnreadSms [REC UNREAD]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
+                $"📬 ListUnreadSms [REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY (no unread)")}");
 
-            if (!resp.Contains("+CMGL"))
+            // 🔥 Chỉ fallback khi modem trả ERROR (không hiểu lệnh)
+            // Nếu REC UNREAD trả OK nhưng rỗng → KHÔNG có tin mới → KHÔNG đọc ALL
+            // (Cũ: luôn fallback ALL → đọc tin cũ đã read → lặp tin)
+            if (gotError && !hasData)
             {
-                // Fallback 1: Thử "ALL" ASCII — đọc tất cả (duplicate cache sẽ skip SMS đã xử lý)
-                resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
-                System.Diagnostics.Debug.WriteLine(
-                    $"📬 ListUnreadSms [ALL]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
-            }
-
-            if (!resp.Contains("+CMGL"))
-            {
-                // Fallback 2: Thử integer 4 = ALL messages (dùng cho một số modem cũ)
-                resp = SendAndRead("AT+CMGL=4", timeoutMs);
-                System.Diagnostics.Debug.WriteLine(
-                    $"📬 ListUnreadSms [4]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
-            }
-
-            if (!resp.Contains("+CMGL"))
-            {
-                // Fallback 3: UCS2-encoded "REC UNREAD" (cho modem yêu cầu strict UCS2)
+                // Fallback 1: UCS2-encoded "REC UNREAD" (cho modem yêu cầu strict UCS2)
                 string unreadHex = EncodeUcs2("REC UNREAD");
                 resp = SendAndRead($"AT+CMGL=\"{unreadHex}\"", timeoutMs);
+                gotError = resp.Contains("ERROR");
+                hasData = resp.Contains("+CMGL");
                 System.Diagnostics.Debug.WriteLine(
-                    $"📬 ListUnreadSms [UCS2 REC UNREAD]: {(resp.Contains("+CMGL") ? "HAS DATA" : resp.Contains("ERROR") ? "ERROR" : "EMPTY")}");
+                    $"📬 ListUnreadSms [UCS2 REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
+            }
+
+            if (gotError && !hasData)
+            {
+                // Fallback 2: Thử integer 0 = "REC UNREAD" (một số modem cũ)
+                resp = SendAndRead("AT+CMGL=0", timeoutMs);
+                gotError = resp.Contains("ERROR");
+                hasData = resp.Contains("+CMGL");
+                System.Diagnostics.Debug.WriteLine(
+                    $"📬 ListUnreadSms [0]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
+            }
+
+            if (gotError && !hasData)
+            {
+                // Fallback 3 (cuối cùng): "ALL" — chỉ dùng khi KHÔNG CÓ CÁCH NÀO khác
+                resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
+                System.Diagnostics.Debug.WriteLine(
+                    $"⚠️ ListUnreadSms [ALL fallback]: {(resp.Contains("+CMGL") ? "HAS DATA" : "EMPTY")}");
             }
 
             ParseCmglResponse(resp, messages);
