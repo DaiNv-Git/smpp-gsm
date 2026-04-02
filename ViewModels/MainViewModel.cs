@@ -189,6 +189,29 @@ public partial class MainViewModel : ObservableObject
                 ShowNotification("📨 Tin nhắn mới", $"Từ: {sender}\n{content}");
             });
         };
+        // 📞 Discovery progress — hiện trên giao diện
+        _portManager.DiscoveryLog += (comPort, message, isSuccess) =>
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                MessageList.Insert(0, new SmsMessage
+                {
+                    MessageId = $"DISC-{DateTime.Now.Ticks}",
+                    SourceAddr = comPort,
+                    DestAddr = "DISCOVERY",
+                    Content = message,
+                    Direction = "OUT",
+                    Status = isSuccess ? "SENT" : "FAILED",
+                    CreatedAt = DateTime.Now,
+                });
+
+                while (MessageList.Count > 500)
+                    MessageList.RemoveAt(MessageList.Count - 1);
+
+                StatusMessage = $"📞 [{comPort}] {message}";
+                UpdateStats();
+            });
+        };
 
         // 🚀 Auto-scan on startup (always — SIM list should be populated immediately)
         _ = AutoStartAsync();

@@ -27,6 +27,7 @@ public class SerialPortManager : IDisposable
     public event Action<List<SimCard>>? ScanCompleted;
     public event Action<string, string, DateTime>? IncomingSms; // sender, content, time
     public event Action<string, string, bool, string?>? SmsResult; // messageId, status, success, error
+    public event Action<string, string, bool>? DiscoveryLog; // comPort, message, isSuccess
 
     // 📤 SMS Forwarder — queue xử lý tuần tự (shared across all workers)
     private readonly SmsForwarderService _forwarder = new();
@@ -513,7 +514,12 @@ public class SerialPortManager : IDisposable
                     {
                         System.Diagnostics.Debug.WriteLine(
                             $"📞 [{sim.ComPort}] Discovery SMS sent → đợi receiver bắt sender number...");
+                        DiscoveryLog?.Invoke(sim.ComPort, $"📤 Gửi DISCOVER đến {receiverSim.PhoneNumber}", true);
                         discovered++;
+                    }
+                    else
+                    {
+                        DiscoveryLog?.Invoke(sim.ComPort, "❌ Gửi DISCOVER thất bại (timeout)", false);
                     }
                 }
             }
@@ -530,7 +536,12 @@ public class SerialPortManager : IDisposable
                         {
                             System.Diagnostics.Debug.WriteLine(
                                 $"📞 [{sim.ComPort}] Discovery SMS sent via temp helper");
+                            DiscoveryLog?.Invoke(sim.ComPort, $"📤 Gửi DISCOVER đến {receiverSim.PhoneNumber} (temp)", true);
                             discovered++;
+                        }
+                        else
+                        {
+                            DiscoveryLog?.Invoke(sim.ComPort, "❌ Gửi DISCOVER thất bại", false);
                         }
                     }
                 }
@@ -582,6 +593,7 @@ public class SerialPortManager : IDisposable
         var normalizedPhone = AtCommandHelper.NormalizeNumber(senderPhone);
         targetSim.PhoneNumber = normalizedPhone;
         SimUpdated?.Invoke(targetSim);
+        DiscoveryLog?.Invoke(targetSim.ComPort, $"✅ Tìm được số: {normalizedPhone}", true);
 
         System.Diagnostics.Debug.WriteLine(
             $"✅ Discovery: {targetSim.ComPort} CCID={ccid} → Phone={normalizedPhone}");
