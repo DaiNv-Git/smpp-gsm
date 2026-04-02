@@ -26,6 +26,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _totalQueueSize;
     [ObservableProperty] private int _totalSentCount;
     [ObservableProperty] private int _rateLimitedCount;
+    [ObservableProperty] private int _missingPhoneCount;
     [ObservableProperty] private string _scanStatus = "";
     [ObservableProperty] private string _statusMessage = "Sẵn sàng";
     [ObservableProperty] private AppSettings _settings;
@@ -504,6 +505,7 @@ public partial class MainViewModel : ObservableObject
         TotalSentCount = MessageList.Count(m =>
             m.Direction == "OUT" && (m.Status == "SENT" || m.Status == "DELIVERED"));
         RateLimitedCount = SimList.Count(s => s.IsRateLimited);
+        MissingPhoneCount = SimList.Count(s => string.IsNullOrWhiteSpace(s.PhoneNumber) && s.Status != SimStatus.Offline && s.Status != SimStatus.Error);
         UpdateMessageCounts();
     }
 

@@ -447,7 +447,11 @@ public class SerialPortManager : IDisposable
             Thread.Sleep(500);
             StartWorker(sim);
             System.Diagnostics.Debug.WriteLine($"▶️ Worker resumed on {comPort}");
-        }
+    }
+
+    public List<ModemWorker> GetActiveWorkers()
+    {
+        return _workers.Values.ToList();
     }
 
     /// <summary>

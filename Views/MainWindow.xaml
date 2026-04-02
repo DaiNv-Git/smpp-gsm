@@ -155,7 +155,7 @@
 
         <!-- ═══════════════ STATS CARDS ═══════════════ -->
         <Border Grid.Row="1" Padding="12,10" Background="{StaticResource BgPrimaryBrush}">
-            <UniformGrid Columns="4" Rows="1">
+            <UniformGrid Columns="5" Rows="1">
                 <!-- SIMs Online -->
                 <Border CornerRadius="8" Margin="3" Padding="10,8"
                     BorderThickness="1" BorderBrush="#1a3fb950"
@@ -190,6 +190,19 @@
                         <TextBlock Text="{Binding TotalQueueSize}" FontSize="22" FontWeight="Bold"
                             Foreground="{StaticResource AccentYellowBrush}" HorizontalAlignment="Center"/>
                         <TextBlock Text="Hàng đợi" FontSize="9"
+                            Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
+                            Margin="0,-2,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Missing Phone -->
+                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                    BorderThickness="1" BorderBrush="#1ae3b341"
+                    Background="#0de3b341">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding MissingPhoneCount}" FontSize="22" FontWeight="Bold"
+                            Foreground="#e3b341" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Thiếu SĐT" FontSize="9"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>

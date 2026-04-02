@@ -92,8 +92,40 @@ public class SimSyncService : IDisposable
             var deviceName = _settings.AgentId;
             Logger.Info($"🔍 Bắt đầu sync SIM cho device '{deviceName}'...");
 
-            // 1️⃣ Lấy danh sách SIM đang scan từ SerialPortManager (in-memory)
+            // 1️⃣ Lấy danh sách SIM đang scan từ SerialPortManager (in-memory) và refresh trạng thái realtime
+            // Refresh signal level và trạng thái mới nhất từ ModemWorker
+            foreach (var worker in _portManager.GetActiveWorkers())
+            {
+                worker.RefreshSimInfo();
+            }
+
             var scannedSims = _portManager.Sims.Values.ToList();
+
+            // 🔥 Tự động thử resolve SIM thiếu SĐT qua MongoDB mỗi lần sync
+            int resolvedPhones = 0;
+            foreach (var sim in scannedSims.Where(s => string.IsNullOrWhiteSpace(s.PhoneNumber) && !string.IsNullOrWhiteSpace(s.Ccid)))
+            {
+                var dbSim = _mongoDb.FindByCcidFuzzy(sim.Ccid);
+                if (dbSim != null && !string.IsNullOrWhiteSpace(dbSim.PhoneNumber))
+                {
+                    sim.PhoneNumber = dbSim.PhoneNumber;
+                    sim.Provider = dbSim.SimProvider;
+                    resolvedPhones++;
+                    
+                    // Thử lưu vào phonebook
+                    try {
+                        using var helper = new AtCommandHelper(sim.ComPort, _settings.BaudRate);
+                        if (helper.Open()) helper.WritePhoneToSimPhonebook(sim.PhoneNumber);
+                    } catch { }
+                }
+            }
+            if (resolvedPhones > 0)
+            {
+                Logger.Info($"📞 Background Sync: Đã tự động lookup và lấy được SĐT cho {resolvedPhones} SIM từ MongoDB.");
+                // Báo UI update vì local app reference được sửa
+                System.Diagnostics.Debug.WriteLine("Cập nhật lại giao diện vì SĐT thay đổi...");
+                // (Giao diện sẽ tự nhận ra có số thông qua INotifyPropertyChanged hoặc do loop qua update)
+            }
 
             if (scannedSims.Count == 0)
             {
