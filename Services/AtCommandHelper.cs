@@ -393,26 +393,43 @@ public class AtCommandHelper : IDisposable
 
                 SendAndRead("AT+CMGF=1", 500);
 
+                // 🔥 Kiểm tra SMSC — nếu chưa set thì tin nhắn sẽ không đến được
+                var smsc = GetSmsc();
+                if (string.IsNullOrWhiteSpace(smsc))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ SendSms: SMSC chưa set! Đang auto-detect...");
+                    EnsureSmscConfigured();
+                    smsc = GetSmsc();
+                }
+                System.Diagnostics.Debug.WriteLine($"📡 SMSC: {smsc ?? "KHÔNG CÓ — SMS có thể không gửi được!"}");
+
                 string cmgsDest;
                 string actualContent;
 
+                // AT+CSMP first octet = 49 (0x31):
+                //   bit 0-1: TP-MTI = 01 (SMS-SUBMIT)
+                //   bit 3-4: TP-VPF = 10 (relative validity period)
+                //   bit 5:   TP-SRR = 1  (request delivery report)
+                // Validity period 167 ≈ 1 ngày
                 if (isUnicode)
                 {
                     SendAndRead("AT+CSCS=\"UCS2\"", 500);
-                    SendAndRead("AT+CSMP=17,167,0,8", 500);
-                    cmgsDest = EncodeUcs2(normalizedDest);
+                    SendAndRead("AT+CSMP=49,167,0,8", 500);
+                    // LƯU Ý: Không encode UCS2 cho destNumber — đa số modem nhận ASCII cho <da>
+                    cmgsDest = normalizedDest;
                     actualContent = EncodeUcs2(content);
                 }
                 else
                 {
                     SendAndRead("AT+CSCS=\"GSM\"", 500);
-                    SendAndRead("AT+CSMP=17,167,0,0", 500);
+                    SendAndRead("AT+CSMP=49,167,0,0", 500);
                     cmgsDest = normalizedDest;
                     actualContent = content;
                 }
 
                 System.Diagnostics.Debug.WriteLine(
-                    $"📤 SendSms: dest={normalizedDest}, cmgsDest={cmgsDest}, unicode={isUnicode}, len={content.Length}");
+                    $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
 
                 // Check URC trước khi discard buffer
                 if (_port.BytesToRead > 0)
@@ -457,11 +474,8 @@ public class AtCommandHelper : IDisposable
                     return false;
                 }
 
-                // Gửi content
-                _port.Write(actualContent);
-                Thread.Sleep(300);
-                // Gửi Ctrl+Z (0x1A) dạng raw byte
-                _port.Write(new byte[] { 0x1A }, 0, 1);
+                // Gửi content + Ctrl+Z gộp 1 lần tránh modem stall
+                _port.Write(actualContent + (char)26);
 
                 // Wait for result
                 var sb = new StringBuilder();
@@ -478,9 +492,23 @@ public class AtCommandHelper : IDisposable
 
                         if (result.Contains("OK"))
                         {
-                            System.Diagnostics.Debug.WriteLine(
-                                $"✅ SendSms OK to {normalizedDest} (gotCmgs={gotCmgs}) | {result.Replace("\r", " ").Replace("\n", " ").Trim()}");
-                            return true;
+                            var cleanResult = result.Replace("\r", " ").Replace("\n", " ").Trim();
+                            if (gotCmgs)
+                            {
+                                // ✅ Chuẩn: có +CMGS: <mr> + OK → network đã chấp nhận tin nhắn
+                                var mrMatch = Regex.Match(result, @"\+CMGS:\s*(\d+)");
+                                var mr = mrMatch.Success ? mrMatch.Groups[1].Value : "?";
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"✅ SendSms OK to {normalizedDest} (MR={mr}, unicode={isUnicode}) | Response: {cleanResult}");
+                                return true;
+                            }
+                            else
+                            {
+                                // ⚠️ Modem trả OK nhưng KHÔNG có +CMGS: → tin nhắn có thể chưa gửi
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"⚠️ SendSms: OK nhưng thiếu +CMGS: → coi là FAIL | dest={normalizedDest} | Response: {cleanResult}");
+                                return false;
+                            }
                         }
                         if (result.Contains("ERROR"))
                         {
@@ -717,9 +745,19 @@ public class AtCommandHelper : IDisposable
                 string timestamp = quotedFields.LastOrDefault(f =>
                     Regex.IsMatch(f, @"^\d{2,4}/\d{2}/\d{2},\d{2}:\d{2}:\d{2}(?:[+-]\d{2})?$")) ?? "";
                 
-                string content = lines[i + 1].Trim();
+                // 🔥 FIX: Đọc multi-line content (cho đến +CMGL: tiếp theo hoặc OK)
+                var contentSb = new StringBuilder();
+                for (int j = i + 1; j < lines.Length; j++)
+                {
+                    var nextLine = lines[j].Trim();
+                    if (nextLine.StartsWith("+CMGL:") || nextLine == "OK" || nextLine == "ERROR" || nextLine.Length == 0)
+                        break;
+                    if (contentSb.Length > 0) contentSb.Append('\n');
+                    contentSb.Append(nextLine);
+                }
+                string rawContent = contentSb.ToString();
                 // Content không nằm trong ngoặc kép theo format CMGL, nên phải tự decode riêng phần này
-                string decodedContent = DecodeUcs2IfNeeded(content);
+                string decodedContent = DecodeUcs2IfNeeded(rawContent);
 
                 var time = ParseSmsTimestamp(timestamp);
                 if (!string.IsNullOrWhiteSpace(decodedContent))
@@ -831,7 +869,14 @@ public class AtCommandHelper : IDisposable
                     int code = Convert.ToInt32(text.Substring(i, 4), 16);
                     sb.Append((char)code);
                 }
-                return sb.ToString();
+                var decoded = sb.ToString();
+                // 🔥 Heuristic: kiểm tra ít nhất 50% chars là printable (tránh false positive)
+                // Ví dụ: OTP "12345678" sẽ decode thành ký tự control → reject
+                int printableCount = decoded.Count(c => !char.IsControl(c) || c == '\n' || c == '\r' || c == '\t');
+                if (printableCount >= decoded.Length * 0.5)
+                    return decoded;
+                // Fallback: không phải UCS2 thật → trả raw text
+                return text;
             }
             catch { return text; }
         }
