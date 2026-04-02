@@ -262,14 +262,34 @@ public class AtCommandHelper : IDisposable
     /// USSD KHÔNG chạy ở đây vì quá chậm (12-24s/SIM) → gọi riêng QueryPhoneByUssd() sau scan.</summary>
     public string? DetectPhoneNumber()
     {
-        // 1. Try CNUM
+        // 1. Try CNUM (nhanh, ~1s)
         var phone = GetCnum();
-        if (!string.IsNullOrWhiteSpace(phone)) return NormalizeNumber(phone);
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Phone via CNUM: {phone}");
+            return NormalizeNumber(phone);
+        }
 
-        // 2. Try phonebook
+        // 2. Try phonebook (nhanh, ~1s)
         phone = ReadPhonebookNumber();
-        if (!string.IsNullOrWhiteSpace(phone)) return NormalizeNumber(phone);
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Phone via Phonebook: {phone}");
+            return NormalizeNumber(phone);
+        }
 
+        // 3. Try USSD (chậm ~10s, chỉ dùng khi CNUM+CPBR fail)
+        System.Diagnostics.Debug.WriteLine($"📞 [{_portName}] CNUM+CPBR failed → trying USSD...");
+        phone = QueryPhoneByUssd();
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Phone via USSD: {phone}");
+            // Ghi vào phonebook để lần scan sau không cần USSD nữa
+            try { WritePhoneToSimPhonebook(phone); } catch { }
+            return NormalizeNumber(phone);
+        }
+
+        System.Diagnostics.Debug.WriteLine($"❌ [{_portName}] Không thể detect số ĐT bằng AT commands");
         return null;
     }
 

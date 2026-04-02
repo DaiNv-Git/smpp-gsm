@@ -340,6 +340,18 @@ public partial class MainViewModel : ObservableObject
         {
             _ = ConnectToServerAsync();
         }
+
+        // 🔥 Auto Self-SMS Discovery cho SIM thiếu số (chạy sau 10s để workers ổn định)
+        var missingPhone = SimList.Count(s => string.IsNullOrWhiteSpace(s.PhoneNumber));
+        if (missingPhone > 0)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(10_000); // Đợi workers khởi động xong
+                Logger.Info($"📞 Auto Self-SMS Discovery: {missingPhone} SIM thiếu số...");
+                await _portManager.DiscoverPhoneBySelfSmsAsync();
+            });
+        }
     }
 
     [RelayCommand]
