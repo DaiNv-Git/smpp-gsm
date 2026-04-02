@@ -258,7 +258,7 @@ public class AtCommandHelper : IDisposable
         _ => mccMnc,
     };
 
-    /// <summary>Phát hiện số điện thoại (CNUM → phonebook → null).</summary>
+    /// <summary>Phát hiện số điện thoại (CNUM → phonebook → USSD → null).</summary>
     public string? DetectPhoneNumber()
     {
         // 1. Try CNUM
@@ -269,7 +269,113 @@ public class AtCommandHelper : IDisposable
         phone = ReadPhonebookNumber();
         if (!string.IsNullOrWhiteSpace(phone)) return NormalizeNumber(phone);
 
+        // 3. Try USSD — gọi mã nhà mạng để lấy số (Docomo *#100#, Rakuten *543#, etc.)
+        phone = QueryPhoneByUssd();
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"📱 USSD detected phone: {phone}");
+            // Ghi vào phonebook để lần sau đọc nhanh
+            try { WritePhoneToSimPhonebook(phone); } catch { }
+            return NormalizeNumber(phone);
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// Query số điện thoại qua USSD code của nhà mạng Nhật.
+    /// Docomo: *#100#, Rakuten: *543#, SoftBank: *5555#, AU: *5491#
+    /// </summary>
+    public string? QueryPhoneByUssd()
+    {
+        var imsi = GetImsi();
+        var ussdCodes = GetUssdCodesForCarrier(imsi);
+        if (ussdCodes.Length == 0) return null;
+
+        foreach (var ussdCode in ussdCodes)
+        {
+            try
+            {
+                System.Diagnostics.Debug.WriteLine($"📞 Trying USSD: {ussdCode} (IMSI={imsi})");
+
+                // Gửi USSD request
+                var resp = SendAndRead($"AT+CUSD=1,\"{ussdCode}\",15", 10000);
+
+                // Parse response: +CUSD: 0,"あなたの電話番号は 090-1234-5678 です",0
+                // hoặc: +CUSD: 0,"Your number is +819012345678",0
+                if (resp.Contains("+CUSD:"))
+                {
+                    // Extract quoted content
+                    var m = Regex.Match(resp, @"\+CUSD:\s*\d+,\"([^\"]+)\"");
+                    if (m.Success)
+                    {
+                        var ussdContent = DecodeUcs2IfNeeded(m.Groups[1].Value);
+                        System.Diagnostics.Debug.WriteLine($"📞 USSD response: {ussdContent}");
+
+                        // Tìm số điện thoại trong response
+                        var phoneMatch = Regex.Match(ussdContent, @"(\+?\d[\d\-]{8,15}\d)");
+                        if (phoneMatch.Success)
+                        {
+                            var phone = phoneMatch.Value.Replace("-", "");
+                            return phone;
+                        }
+                    }
+                }
+
+                // Một số modem trả USSD chậm qua URC — đợi thêm
+                Thread.Sleep(2000);
+                if (_port.BytesToRead > 0)
+                {
+                    var extra = _port.ReadExisting();
+                    var em = Regex.Match(extra, @"\+CUSD:\s*\d+,\"([^\"]+)\"");
+                    if (em.Success)
+                    {
+                        var ussdContent = DecodeUcs2IfNeeded(em.Groups[1].Value);
+                        var phoneMatch = Regex.Match(ussdContent, @"(\+?\d[\d\-]{8,15}\d)");
+                        if (phoneMatch.Success)
+                            return phoneMatch.Value.Replace("-", "");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"⚠️ USSD {ussdCode} failed: {ex.Message}");
+            }
+            finally
+            {
+                // Cancel USSD session
+                try { SendAndRead("AT+CUSD=2", 500); } catch { }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Map IMSI prefix → USSD codes để query số điện thoại.</summary>
+    private static string[] GetUssdCodesForCarrier(string? imsi)
+    {
+        if (string.IsNullOrWhiteSpace(imsi)) return [];
+
+        // NTT Docomo
+        if (imsi.StartsWith("44010")) return ["*#100#"];
+        // Rakuten Mobile
+        if (imsi.StartsWith("44011")) return ["*543#", "*#100#"];
+        // SoftBank / Y!mobile
+        if (imsi.StartsWith("44020") || imsi.StartsWith("44000") ||
+            imsi.StartsWith("44001") || imsi.StartsWith("44002") || imsi.StartsWith("44003"))
+            return ["*5555#"];
+        // KDDI/AU
+        if (imsi.StartsWith("44050") || imsi.StartsWith("44051") ||
+            imsi.StartsWith("44053") || imsi.StartsWith("44054"))
+            return ["*5491#"];
+        // Viettel (VN)
+        if (imsi.StartsWith("45204") || imsi.StartsWith("45205")) return ["*098#"];
+        // Mobifone (VN)
+        if (imsi.StartsWith("45201")) return ["*0#"];
+        // Vinaphone (VN)
+        if (imsi.StartsWith("45202")) return ["*110#"];
+
+        return [];
     }
 
     /// <summary>Ghi số điện thoại vào SIM phonebook (SM) để scan nhanh hơn lần sau.</summary>
