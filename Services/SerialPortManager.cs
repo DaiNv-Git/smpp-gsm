@@ -57,9 +57,19 @@ public class SerialPortManager : IDisposable
         {
             System.Diagnostics.Debug.WriteLine("🔍 Bắt đầu scan COM ports...");
 
-            // Stop all workers first
+            // Stop all workers first, and wait until they ACTUALLY stop and release ports.
+            // A simple delay is not enough because Worker threads might still be inside AT command timeouts.
+            var activeWorkers = _workers.Values.ToList();
             StopAllWorkers();
-            await Task.Delay(500);
+            
+            // Wait up to 3 seconds for all ports to be officially released
+            int waitLoops = 0;
+            while(activeWorkers.Any(w => w.IsRunning) && waitLoops < 15)
+            {
+                await Task.Delay(200);
+                waitLoops++;
+            }
+            await Task.Delay(500); // extra grace period for serial driver to flush
 
             var portNames = SerialPort.GetPortNames().Distinct().OrderBy(p => p).ToArray();
             System.Diagnostics.Debug.WriteLine($"📋 Tìm thấy {portNames.Length} COM ports");
