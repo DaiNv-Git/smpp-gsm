@@ -10,7 +10,12 @@ namespace GsmAgent.Services;
 /// </summary>
 public class ModemWorker : IDisposable
 {
-    private const int SmsScanIntervalMs = 2000; // 🔥 Giảm từ 5000 → 2000 để phát hiện SMS mới nhanh hơn
+    // 🔥 FIX: Adaptive polling — không tốn thêm khi busy, poll nhanh khi idle
+    // - Idle (queue rỗng): poll mỗi 3s → tiết kiệm USB bandwidth
+    // - Active (queue có task): poll sau mỗi task → phát hiện SMS mới nhanh
+    // - After SMS received: poll lại sau 1s (SMS có thể đến liên tục)
+    private const int SmsScanIntervalIdleMs = 3000;
+    private const int SmsScanIntervalActiveMs = 500;
     private readonly AtCommandHelper _helper;
     private readonly BlockingCollection<SmsTask> _queue = new(100);
     private readonly CancellationTokenSource _cts = new();
@@ -53,7 +58,6 @@ public class ModemWorker : IDisposable
         };
     }
 
-    private bool _urcSupported;
     private int _lastSmsCount = -1;
     private DateTime _lastSmsCountCheck = DateTime.MinValue;
 
@@ -70,19 +74,11 @@ public class ModemWorker : IDisposable
             return false;
         }
 
-        // Test URC support → fallback to polling if not supported
-        _urcSupported = _helper.TestUrcSupport();
-        if (_urcSupported)
-        {
-            _helper.EnableUrc();
-            System.Diagnostics.Debug.WriteLine($"✅ [{_sim.ComPort}] URC supported — real-time SMS detection");
-        }
-        else
-        {
-            System.Diagnostics.Debug.WriteLine($"⚠️ [{_sim.ComPort}] URC not supported — using Simulated URC (SMS count polling)");
-        }
+        // 🔥 Bỏ URC — không đáng tin cậy, dùng polling thích ứng thay thế
+        // URC miss: modem bắn 1 CMTI rồi reset, đợi next SMS mới bắn tiếp
+        // URC gộp: nhiều SMS đến cùng lúc → chỉ 1 CMTI → bỏ sót
 
-        // 🔥 Đảm bảo SMSC đã được cấu hình — nếu thiếu, SMS sẽ gửi đi nhưng không đến
+        // Đảm bảo SMSC đã được cấu hình — nếu thiếu, SMS sẽ gửi đi nhưng không đến
         _helper.EnsureSmscConfigured();
 
         IsRunning = true;
@@ -97,70 +93,64 @@ public class ModemWorker : IDisposable
         _sim.QueueSize = _queue.Count;
     }
 
+    /// <summary>Dừng worker và đợi thread thật sự kết thúc.</summary>
     public void Stop()
     {
         IsRunning = false;
         _cts.Cancel();
         _queue.CompleteAdding();
+        // 🔥 FIX: Join thread — đợi worker thread thật sự kết thúc trước khi return
+        // Caller (SerialPortManager.StopWorkerForPort) cần biết thread đã dừng thật
+        _thread.Join(3000);
     }
 
     private void RunLoop()
     {
         System.Diagnostics.Debug.WriteLine($"▶️ ModemWorker started: {_sim.ComPort}");
 
-        // 🔥 FIX: Poll SMS count mỗi 2 giây — bỏ URC vì không đáng tin cậy và gây lặp SMS
-        // URC bị miss: modem chỉ bắn 1 lần rồi tự reset, đợi next SMS mới bắn tiếp
-        // URC bị trùng: nhiều SMS đến gần nhau → bị gộp thành 1 CMTI → scan thiếu
-
+        // 🔥 FIX: Adaptive polling — poll NHANH khi queue rỗng (idle), poll CHẬM khi đang active
+        // Bỏ URC vì: miss khi modem reset, gộp nhiều SMS thành 1 CMTI
         while (IsRunning && !_cts.Token.IsCancellationRequested)
         {
             try
             {
-                // 1. Poll SMS count — LUÔN LUÔN kiểm tra định kỳ mỗi 2 giây
+                // 1. Poll SMS count — interval thích ứng với trạng thái worker
                 var elapsed = (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds;
-                if (elapsed >= SmsScanIntervalMs)
+                int interval = _queue.Count > 0 ? SmsScanIntervalActiveMs : SmsScanIntervalIdleMs;
+
+                if (elapsed >= interval)
                 {
                     _lastSmsCountCheck = DateTime.Now;
                     var currentCount = _helper.GetSmsCount();
 
-                    // Scan khi: count tăng HOẶC count > baseline (SMS đến rồi bị xóa đúng lúc poll)
-                    bool shouldScan = false;
+                    // Scan khi count TĂNG hoặc count > 0 với baseline >= 0
+                    // (không chờ count != last → tránh miss khi SMS đến rồi bị xóa đúng lúc poll)
+                    if (currentCount > _lastSmsCount || (currentCount > 0 && _lastSmsCount >= 0))
+                    {
+                        if (currentCount != _lastSmsCount)
+                            System.Diagnostics.Debug.WriteLine(
+                                $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
 
-                    if (currentCount > _lastSmsCount)
-                    {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"📬 [{_sim.ComPort}] SMS count tăng: {_lastSmsCount} → {currentCount}");
-                        shouldScan = true;
-                    }
-                    else if (currentCount > 0 && _lastSmsCount >= 0)
-                    {
-                        // count > 0 nhưng bằng last → có thể SMS đến rồi bị xóa giữa 2 poll
-                        // scan để chắc chắn không bỏ sót
-                        shouldScan = true;
+                        ReadIncomingSms();
                     }
 
                     _lastSmsCount = currentCount;
-
-                    if (shouldScan)
-                    {
-                        ReadIncomingSms();
-                    }
                 }
 
-                // 2. Process send queue — non-blocking, không chờ để không block poll cycle
-                // 🔥 FIX: Nếu không có task, ngủ NGẮN (100ms) để poll kịp thời
-                // Trước: block 30s khi gửi SMS → bỏ lỡ SMS đến trong lúc gửi
-                if (_queue.TryTake(out var task, 100, _cts.Token))
+                // 2. Process send queue — non-blocking
+                // Block tối đa 500ms (đủ để queue refill nếu có nhiều task)
+                // Trước: block 100ms → CPU spin khi queue rỗng → lãng phí
+                // Sau: block 500ms → worker idle đúng cách, polling vẫn chạy mỗi 3s interval
+                if (_queue.TryTake(out var task, 500, _cts.Token))
                 {
                     ProcessSmsTask(task);
 
-                    // 🔥 Check SMS ngay sau gửi xong — có thể có SMS đến trong lúc đang gửi
-                    // (SMS count đã được update trong ReadIncomingSms nếu có)
+                    // 🔥 Check SMS ngay sau gửi xong
+                    // Khi queue active → interval=500ms → poll rất nhanh sau task
                     _lastSmsCount = _helper.GetSmsCount();
                     if (_lastSmsCount > 0)
                         ReadIncomingSms();
                 }
-                // else: không có task → loop quay lại ngay, không block ở đây
             }
             catch (OperationCanceledException)
             {
@@ -171,7 +161,6 @@ public class ModemWorker : IDisposable
                 System.Diagnostics.Debug.WriteLine($"❌ Worker {_sim.ComPort} error: {ex.Message}");
                 Thread.Sleep(3000);
 
-                // Try reconnect
                 if (!_helper.IsAlive())
                 {
                     _helper.Close();

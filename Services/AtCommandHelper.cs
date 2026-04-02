@@ -1065,17 +1065,28 @@ public class AtCommandHelper : IDisposable
 
     // ==================== Utilities ====================
 
-    /// <summary>Chuẩn hóa số điện thoại — hỗ trợ cả 3 format:
-    /// +81xxx → giữ nguyên (quốc tế)
-    /// 81xxx  → thêm + thành +81xxx (quốc tế, thiếu dấu +)
-    /// 0xxx   → giữ nguyên (local Nhật)
+    /// <summary>
+    /// Chuẩn hóa số điện thoại — hỗ trợ:
+    /// - +81xxx → giữ nguyên (Nhật quốc tế)
+    /// - 81xxx  → thêm + (Nhật, thiếu +)
+    /// - 0xxx   → giữ nguyên (local Nhật)
+    /// - +84xxx → giữ nguyên (VN quốc tế)
+    /// - 84xxx  → thêm + (VN, thiếu +)
+    /// - 0xxx   → giữ nguyên (VN local: 098xxx → giữ nguyên vì modem tự nhận diện)
     /// </summary>
     public static string NormalizeNumber(string phone)
     {
         phone = phone.Trim().Replace(" ", "").Replace("-", "");
-        // 81xxx (country code Nhật, thiếu +) → thêm + để modem hiểu đúng international
-        if (phone.StartsWith("81") && !phone.StartsWith("+") && phone.Length >= 11)
+        if (string.IsNullOrWhiteSpace(phone)) return phone;
+
+        // 84xxx (VN, thiếu +) → +84xxx
+        if (phone.StartsWith("84") && !phone.StartsWith("+") && phone.Length >= 11)
             phone = "+" + phone;
+        // 81xxx (Nhật, thiếu +) → +81xxx
+        else if (phone.StartsWith("81") && !phone.StartsWith("+") && phone.Length >= 11)
+            phone = "+" + phone;
+        // Số local VN (09xxx, 01xxx): giữ nguyên vì modem tự hiểu
+        // Số international (+84xxx, +81xxx): giữ nguyên
         return phone;
     }
 
@@ -1188,38 +1199,36 @@ public class AtCommandHelper : IDisposable
     /// </summary>
     public int GetCallStatus()
     {
-        lock (_lock)
+        // 🔥 FIX: Dùng SendAndRead thay vì raw Write + lock riêng
+        // Bug: MakeVoiceCall giữ lock(_lock) → gọi GetCallStatus() (cũng lock) → DEADLOCK
+        // Fix: gọi SendAndRead (đã có lock bên trong) → deadlock được giải quyết
+        try
         {
-            try
+            if (!_port.IsOpen) return -1;
+
+            // Check URC buffer trước khi gửi command (CLCC URC có thể đến async)
+            if (_port.BytesToRead > 0)
             {
-                if (!_port.IsOpen) return -1;
-
-                _port.DiscardInBuffer();
-                _port.Write("AT+CLCC\r");
-                Thread.Sleep(300);
-
-                var sb = new StringBuilder();
-                var deadline = DateTime.Now.AddMilliseconds(1500);
-                while (DateTime.Now < deadline)
+                var pending = _port.ReadExisting();
+                if (pending.Contains("+CLCC:"))
                 {
-                    if (_port.BytesToRead > 0)
-                        sb.Append(_port.ReadExisting());
-                    if (sb.ToString().Contains("OK") || sb.ToString().Contains("ERROR"))
-                        break;
-                    Thread.Sleep(50);
+                    var match = Regex.Match(pending, @"\+CLCC:\s*\d+,\d+,(\d+)");
+                    if (match.Success)
+                        return int.Parse(match.Groups[1].Value);
                 }
-
-                var resp = sb.ToString();
-                // +CLCC: <idx>,<dir>,<stat>,<mode>,<mpty>[,<number>,<type>]
-                var match = Regex.Match(resp, @"\+CLCC:\s*\d+,\d+,(\d+)");
-                if (match.Success)
-                    return int.Parse(match.Groups[1].Value);
-
-                // Không có +CLCC line = không có cuộc gọi nào
-                return -1;
             }
-            catch { return -1; }
+
+            var resp = SendAndRead("AT+CLCC", 2000);
+
+            // +CLCC: <idx>,<dir>,<stat>,<mode>,<mpty>[,<number>,<type>]
+            var m = Regex.Match(resp, @"\+CLCC:\s*\d+,\d+,(\d+)");
+            if (m.Success)
+                return int.Parse(m.Groups[1].Value);
+
+            // Không có +CLCC = không có cuộc gọi nào
+            return -1;
         }
+        catch { return -1; }
     }
 
     /// <summary>Bật CLCC unsolicited result code (tùy chọn).</summary>

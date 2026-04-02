@@ -465,8 +465,21 @@ public class SerialPortManager : IDisposable
             var sim = worker.Sim;
             System.Diagnostics.Debug.WriteLine($"⏸️ Pausing worker on {comPort} for voice call");
             try { worker.Dispose(); } catch { }
-            // Đợi port release
-            Thread.Sleep(500);
+
+            // 🔥 FIX: Đợi thread worker THỰC SỰ kết thúc trước khi mở port
+            // Trước: chỉ Sleep(500) → không đủ, worker thread có thể vẫn đang gửi AT command
+            // Sau: join thread với timeout 3s
+            int waited = 0;
+            while (worker.IsRunning && waited < 3000)
+            {
+                Thread.Sleep(100);
+                waited += 100;
+            }
+            if (worker.IsRunning)
+                System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] Worker thread still running after 3s — proceeding anyway");
+            else
+                System.Diagnostics.Debug.WriteLine($"✅ [{comPort}] Worker stopped after {waited}ms");
+
             return sim;
         }
         return _sims.TryGetValue(comPort, out var s) ? s : null;

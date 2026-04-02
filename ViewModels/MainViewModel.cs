@@ -704,13 +704,15 @@ public partial class MainViewModel : ObservableObject
                         answered = true;
                         break;
                     }
-                    else if (status == -1) // No call = đã kết thúc
+                    else if (status == -1) // No call = đối phương tắt máy trước khi trả lời
                     {
                         UpdateCallUI(callRecord, CallState.NoAnswer, "❌ Không ai bắt máy");
                         helper.Dispose();
                         _portManager.RestartWorkerForPort(sim.ComPort);
                         return;
                     }
+                    // status == 2 (dialing) hoặc status == 3 (ringing) → tiếp tục đợi
+                    // status == 6 (released) → có thể đối phương từ chối → tiếp tục đợi
 
                     // Timeout 45s không bắt máy
                     if ((DateTime.Now - ringStart).TotalSeconds >= 45)
@@ -723,6 +725,9 @@ public partial class MainViewModel : ObservableObject
                     }
                 }
 
+                // 🔥 FIX: ct.IsCancellationRequested checked AFTER the loop
+                // Trước: check trước loop → bỏ qua HangUp nếu user cancel trong lúc ringing
+                // Sau: HangUp được gọi trước khi dispose/restart
                 if (ct.IsCancellationRequested)
                 {
                     helper.HangUp();
@@ -875,12 +880,13 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void HangUpCall()
     {
+        // 🔥 FIX: Chỉ Cancel token + HangUp + Signal — KHÔNG dispose ở đây
+        // MakeCallAsync loop sẽ handle cleanup + RestartWorker khi nhận CancellationRequested
+        // Trước: HangUpCall dispose helper → MakeCallAsync loop cũng dispose → race condition
         _callCts?.Cancel();
         try
         {
             _activeCallHelper?.HangUp();
-            _activeCallHelper?.Dispose();
-            _activeCallHelper = null;
         }
         catch { }
         CallStatus = "⏹️ Đã cúp máy";
