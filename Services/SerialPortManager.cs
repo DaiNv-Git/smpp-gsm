@@ -130,6 +130,16 @@ public class SerialPortManager : IDisposable
 
             var result = _sims.Values.ToList();
             ScanCompleted?.Invoke(result);
+
+            // 📞 Pass 3: Self-SMS discovery — chạy BACKGROUND cho SIM thiếu số
+            // SIM chưa biết số gửi SMS đến SIM đã biết số → bắt sender = số của nó
+            var simsWithoutPhone = result.Where(s => string.IsNullOrWhiteSpace(s.PhoneNumber)).ToList();
+            if (simsWithoutPhone.Count > 0)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"📞 {simsWithoutPhone.Count} SIM thiếu số → sẽ chạy Self-SMS Discovery sau khi start workers");
+            }
+
             return result;
         }
         finally
@@ -293,6 +303,14 @@ public class SerialPortManager : IDisposable
             },
             onIncomingSms: (comPort, sender, content, time) =>
             {
+                // 📞 Self-SMS Discovery: intercepte "DISCOVER:{ccid}" messages
+                if (content.StartsWith("DISCOVER:") && !string.IsNullOrWhiteSpace(sender))
+                {
+                    var ccid = content.Substring("DISCOVER:".Length).Trim();
+                    HandlePhoneDiscovery(ccid, sender);
+                    return true; // Không forward nội bộ lên API
+                }
+
                 IncomingSms?.Invoke(sender, content, time);
 
                 // Persist local queue first, API forward still happens asynchronously.
@@ -429,6 +447,176 @@ public class SerialPortManager : IDisposable
             Thread.Sleep(500);
             StartWorker(sim);
             System.Diagnostics.Debug.WriteLine($"▶️ Worker resumed on {comPort}");
+        }
+    }
+
+    /// <summary>
+    /// 📞 Self-SMS Discovery: SIM chưa biết số gửi SMS đến SIM đã biết số.
+    /// Receiver bắt sender number → đó chính là số của SIM không biết.
+    /// Gọi SAU khi StartAllWorkers() (cần receiver worker đang chạy để nhận SMS).
+    /// </summary>
+    public async Task DiscoverPhoneBySelfSmsAsync()
+    {
+        var simsWithoutPhone = _sims.Values
+            .Where(s => string.IsNullOrWhiteSpace(s.PhoneNumber))
+            .ToList();
+
+        if (simsWithoutPhone.Count == 0)
+        {
+            System.Diagnostics.Debug.WriteLine("📞 Tất cả SIM đã có số — không cần discovery");
+            return;
+        }
+
+        // Tìm SIM có số làm receiver
+        var receiverSim = _sims.Values.FirstOrDefault(s =>
+            !string.IsNullOrWhiteSpace(s.PhoneNumber) &&
+            _workers.ContainsKey(s.ComPort));
+
+        if (receiverSim == null)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"⚠️ Không có SIM nào có số + đang chạy worker → không thể Self-SMS Discovery. " +
+                $"Cần ít nhất 1 SIM có số điện thoại (nhập thủ công hoặc có sẵn trong MongoDB).");
+            return;
+        }
+
+        System.Diagnostics.Debug.WriteLine(
+            $"📞 Self-SMS Discovery: {simsWithoutPhone.Count} SIM thiếu số → gửi đến {receiverSim.PhoneNumber} ({receiverSim.ComPort})");
+
+        int discovered = 0;
+        foreach (var sim in simsWithoutPhone)
+        {
+            // Skip nếu worker đang chạy trên port này (không mở 2 helper cùng lúc)
+            if (_workers.ContainsKey(sim.ComPort))
+            {
+                // Dùng worker hiện tại để gửi
+                if (_workers.TryGetValue(sim.ComPort, out var worker) && worker.IsRunning)
+                {
+                    var tcs = new TaskCompletionSource<bool>();
+                    worker.EnqueueSms(new SmsTask
+                    {
+                        MessageId = $"DISCOVER-{sim.Ccid}",
+                        DestAddr = receiverSim.PhoneNumber!,
+                        Content = $"DISCOVER:{sim.Ccid}",
+                        AllowRedispatch = false,
+                        CompletionSource = tcs,
+                    });
+
+                    // Đợi gửi xong (timeout 30s)
+                    var timeout = Task.Delay(30000);
+                    await Task.WhenAny(tcs.Task, timeout);
+                    if (tcs.Task.IsCompletedSuccessfully && tcs.Task.Result)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📞 [{sim.ComPort}] Discovery SMS sent → đợi receiver bắt sender number...");
+                        discovered++;
+                    }
+                }
+            }
+            else
+            {
+                // Port chưa có worker → mở helper tạm
+                try
+                {
+                    using var helper = new AtCommandHelper(sim.ComPort, _settings.BaudRate);
+                    if (helper.Open() && helper.IsAlive())
+                    {
+                        var sent = helper.SendSms(receiverSim.PhoneNumber!, $"DISCOVER:{sim.Ccid}");
+                        if (sent)
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"📞 [{sim.ComPort}] Discovery SMS sent via temp helper");
+                            discovered++;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ [{sim.ComPort}] Discovery SMS failed: {ex.Message}");
+                }
+            }
+
+            // Đợi giữa các SMS tránh spam
+            await Task.Delay(3000);
+        }
+
+        // Đợi receiver xử lý tất cả discovery SMS
+        if (discovered > 0)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"📞 Đã gửi {discovered} discovery SMS → đợi 10s cho receiver xử lý...");
+            await Task.Delay(10000);
+
+            var stillMissing = _sims.Values.Count(s => string.IsNullOrWhiteSpace(s.PhoneNumber));
+            System.Diagnostics.Debug.WriteLine(
+                $"📞 Discovery hoàn tất: {discovered - stillMissing} số mới tìm được, {stillMissing} vẫn thiếu");
+        }
+    }
+
+    /// <summary>
+    /// Xử lý SMS discovery: map CCID → sender phone number.
+    /// Được gọi từ onIncomingSms callback khi nhận tin "DISCOVER:{ccid}".
+    /// </summary>
+    private void HandlePhoneDiscovery(string ccid, string senderPhone)
+    {
+        System.Diagnostics.Debug.WriteLine(
+            $"📞 Discovery received: CCID={ccid} → Phone={senderPhone}");
+
+        // Tìm SIM theo CCID
+        var targetSim = _sims.Values.FirstOrDefault(s =>
+            s.Ccid != null && s.Ccid.Contains(ccid.Length >= 18 ? ccid[..18] : ccid));
+
+        if (targetSim == null)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"⚠️ Discovery: không tìm thấy SIM với CCID={ccid}");
+            return;
+        }
+
+        // Update phone number
+        var normalizedPhone = AtCommandHelper.NormalizeNumber(senderPhone);
+        targetSim.PhoneNumber = normalizedPhone;
+        SimUpdated?.Invoke(targetSim);
+
+        System.Diagnostics.Debug.WriteLine(
+            $"✅ Discovery: {targetSim.ComPort} CCID={ccid} → Phone={normalizedPhone}");
+
+        // Ghi vào SIM phonebook để lần scan sau đọc được
+        if (_workers.TryGetValue(targetSim.ComPort, out _))
+        {
+            // Worker đang chạy → không mở helper mới, skip phonebook write
+        }
+        else
+        {
+            try
+            {
+                using var helper = new AtCommandHelper(targetSim.ComPort, _settings.BaudRate);
+                if (helper.Open())
+                    helper.WritePhoneToSimPhonebook(normalizedPhone);
+            }
+            catch { /* ignore */ }
+        }
+
+        // Persist vào MongoDB nếu có
+        if (_mongoDb != null)
+        {
+            try
+            {
+                var doc = _mongoDb.FindByCcidFuzzy(ccid);
+                if (doc != null)
+                {
+                    doc.PhoneNumber = normalizedPhone;
+                    _mongoDb.Save(doc);
+                    System.Diagnostics.Debug.WriteLine(
+                        $"💾 Discovery: saved to MongoDB: {normalizedPhone}");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"⚠️ Discovery: MongoDB save failed: {ex.Message}");
+            }
         }
     }
 

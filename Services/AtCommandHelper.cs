@@ -258,7 +258,8 @@ public class AtCommandHelper : IDisposable
         _ => mccMnc,
     };
 
-    /// <summary>Phát hiện số điện thoại (CNUM → phonebook → USSD → null).</summary>
+    /// <summary>Phát hiện số điện thoại (CNUM → phonebook → null).
+    /// USSD KHÔNG chạy ở đây vì quá chậm (12-24s/SIM) → gọi riêng QueryPhoneByUssd() sau scan.</summary>
     public string? DetectPhoneNumber()
     {
         // 1. Try CNUM
@@ -268,16 +269,6 @@ public class AtCommandHelper : IDisposable
         // 2. Try phonebook
         phone = ReadPhonebookNumber();
         if (!string.IsNullOrWhiteSpace(phone)) return NormalizeNumber(phone);
-
-        // 3. Try USSD — gọi mã nhà mạng để lấy số (Docomo *#100#, Rakuten *543#, etc.)
-        phone = QueryPhoneByUssd();
-        if (!string.IsNullOrWhiteSpace(phone))
-        {
-            System.Diagnostics.Debug.WriteLine($"📱 USSD detected phone: {phone}");
-            // Ghi vào phonebook để lần sau đọc nhanh
-            try { WritePhoneToSimPhonebook(phone); } catch { }
-            return NormalizeNumber(phone);
-        }
 
         return null;
     }
