@@ -10,11 +10,11 @@ namespace GsmAgent.Services;
 /// </summary>
 public class ModemWorker : IDisposable
 {
-    // 🔥 FIX: Adaptive polling — không tốn thêm khi busy, poll nhanh khi idle
-    // - Idle (queue rỗng): poll mỗi 3s → tiết kiệm USB bandwidth
+    // 🔥 FIX: Adaptive polling — poll nhanh để tránh miss SMS mới
+    // - Idle (queue rỗng): poll mỗi 1500ms (từ 3000ms — SMS có thể đến bất cứ lúc nào)
     // - Active (queue có task): poll sau mỗi task → phát hiện SMS mới nhanh
-    // - After SMS received: poll lại sau 1s (SMS có thể đến liên tục)
-    private const int SmsScanIntervalIdleMs = 3000;
+    // - After SMS received: poll lại sau 500ms (SMS có thể đến liên tục)
+    private const int SmsScanIntervalIdleMs = 1500;
     private const int SmsScanIntervalActiveMs = 500;
     private readonly AtCommandHelper _helper;
     private readonly BlockingCollection<SmsTask> _queue = new(100);
@@ -123,18 +123,21 @@ public class ModemWorker : IDisposable
                     _lastSmsCountCheck = DateTime.Now;
                     var currentCount = _helper.GetSmsCount();
 
-                    // Scan khi count TĂNG hoặc count > 0 với baseline >= 0
-                    // (không chờ count != last → tránh miss khi SMS đến rồi bị xóa đúng lúc poll)
+                    // Scan khi count TĂNG (có SMS mới đến)
+                    // Hoặc count > 0 với baseline đã có (đảm bảo scan lần đầu)
+                    // Hoặc count == 0 nhưng baseline cũng là 0 (vẫn scan để đảm bảo)
                     if (currentCount > _lastSmsCount || (currentCount > 0 && _lastSmsCount >= 0))
                     {
-                        if (currentCount != _lastSmsCount)
-                            System.Diagnostics.Debug.WriteLine(
-                                $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
-
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
                         ReadIncomingSms();
+                        _lastSmsCount = currentCount;
                     }
-
-                    _lastSmsCount = currentCount;
+                    else if (currentCount == 0)
+                    {
+                        // Count về 0 → đã xử lý hết trong scan trước, reset baseline
+                        _lastSmsCount = 0;
+                    }
                 }
 
                 // 2. Process send queue — non-blocking

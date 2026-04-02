@@ -202,6 +202,20 @@ public class SerialPortManager : IDisposable
             // 3. Phone number — thử nhiều cách (CNUM → phonebook entries → network registration)
             var phone = helper!.DetectPhoneNumberExtended();
 
+            // 🔒 Preserve existing phone number if scan failed to detect it
+            // — Prevent losing phone number when SIM has CNUM timeout / USSD fail
+            // — SIM port still has the same CCID, so it's the same physical SIM
+            if (string.IsNullOrWhiteSpace(phone))
+            {
+                if (_sims.TryGetValue(comPort, out var existingSim) &&
+                    !string.IsNullOrWhiteSpace(existingSim.PhoneNumber))
+                {
+                    phone = existingSim.PhoneNumber;
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📱 [{comPort}] Giữ số cũ từ cache: {phone} (CCID={ccid?.Substring(0, Math.Min(10, ccid.Length))})");
+                }
+            }
+
             // 4. Fallback: query MongoDB trực tiếp (ưu tiên) hoặc BE API
             // Giống cơ chế của SimSyncService.java: AT command → DB fallback
             string? provider = null;
@@ -496,6 +510,7 @@ public class SerialPortManager : IDisposable
             Thread.Sleep(500);
             StartWorker(sim);
             System.Diagnostics.Debug.WriteLine($"▶️ Worker resumed on {comPort}");
+        }
     }
 
     public List<ModemWorker> GetActiveWorkers()

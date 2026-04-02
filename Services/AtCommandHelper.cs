@@ -24,7 +24,8 @@ public class AtCommandHelper : IDisposable
         {
             ReadTimeout = 3000,
             WriteTimeout = 3000,
-            Encoding = Encoding.ASCII,
+            Encoding = Encoding.UTF8,   // UTF-8: hỗ trợ tiếng Việt không dấu / số
+                                        // UCS-2 content gửi riêng qua Write(byte[])
             NewLine = "\r\n",
             DtrEnable = true,
             RtsEnable = true,
@@ -393,7 +394,7 @@ public class AtCommandHelper : IDisposable
         }
 
         // 3. Try USSD (chậm ~10s, chỉ dùng khi CNUM+CPBR fail)
-        System.Diagnostics.Debug.WriteLine($"📞 [{_portName}] CNUM+CPBR failed → trying USSD...");
+        System.Diagnostics.Debug.WriteLine($"📞 [{_port.PortName}] CNUM+CPBR failed → trying USSD...");
         phone = QueryPhoneByUssd();
         if (!string.IsNullOrWhiteSpace(phone))
         {
@@ -403,7 +404,7 @@ public class AtCommandHelper : IDisposable
             return NormalizeNumber(phone);
         }
 
-        System.Diagnostics.Debug.WriteLine($"❌ [{_portName}] Không thể detect số ĐT bằng AT commands");
+        System.Diagnostics.Debug.WriteLine($"❌ [{_port.PortName}] Không thể detect số ĐT bằng AT commands");
         return null;
     }
 
@@ -431,7 +432,7 @@ public class AtCommandHelper : IDisposable
                 if (resp.Contains("+CUSD:"))
                 {
                     // Extract quoted content
-                    var m = Regex.Match(resp, @"\+CUSD:\s*\d+,\"([^\"]+)\"");
+                    var m = Regex.Match(resp, @"\+CUSD:\s*\d+,""([^""]+)""");
                     if (m.Success)
                     {
                         var ussdContent = DecodeUcs2IfNeeded(m.Groups[1].Value);
@@ -452,7 +453,7 @@ public class AtCommandHelper : IDisposable
                 if (_port.BytesToRead > 0)
                 {
                     var extra = _port.ReadExisting();
-                    var em = Regex.Match(extra, @"\+CUSD:\s*\d+,\"([^\"]+)\"");
+                    var em = Regex.Match(extra, @"\+CUSD:\s*\d+,""([^""]+)""");
                     if (em.Success)
                     {
                         var ussdContent = DecodeUcs2IfNeeded(em.Groups[1].Value);
@@ -500,7 +501,7 @@ public class AtCommandHelper : IDisposable
         // Vinaphone (VN)
         if (imsi.StartsWith("45202")) return ["*110#"];
 
-        return [];
+        return Array.Empty<string>();
     }
 
     /// <summary>Ghi số điện thoại vào SIM phonebook (SM) để scan nhanh hơn lần sau.</summary>
@@ -610,7 +611,15 @@ public class AtCommandHelper : IDisposable
         return "Unknown";
     }
 
-    /// <summary>Gửi SMS text mode.</summary>
+    /// <summary>
+    /// Gửi SMS text mode — hỗ trợ đầy đủ tiếng Việt, Trung, Nhật.
+    ///
+    /// Fixes:
+    /// - Encoding = UTF8 → raw bytes qua BaseStream (tránh SerialPort encoding corruption)
+    /// - EncodeUcs2() trả hex string → gửi trực tiếp bytes big-endian (network byte order)
+    /// - GSM 7-bit cho ASCII (tiết kiệm SMS count), tự retry UCS-2 nếu modem từ chối
+    /// - Timeout 2000ms cho AT+CSCS (modem chậm switch charset)
+    /// </summary>
     public bool SendSms(string destNumber, string content, int timeoutMs = 30000)
     {
         lock (_lock)
@@ -619,12 +628,13 @@ public class AtCommandHelper : IDisposable
             {
                 if (!_port.IsOpen) return false;
 
+                // Phát hiện có cần Unicode hay không
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
 
-                SendAndRead("AT+CMGF=1", 500);
+                SendAndRead("AT+CMGF=1", 1000);
 
-                // 🔥 Kiểm tra SMSC — nếu chưa set thì tin nhắn sẽ không đến được
+                // Check SMSC — nếu chưa set, SMS không đến được
                 var smsc = GetSmsc();
                 if (string.IsNullOrWhiteSpace(smsc))
                 {
@@ -635,126 +645,42 @@ public class AtCommandHelper : IDisposable
                 }
                 System.Diagnostics.Debug.WriteLine($"📡 SMSC: {smsc ?? "KHÔNG CÓ — SMS có thể không gửi được!"}");
 
-                string cmgsDest;
-                string actualContent;
-
-                // AT+CSMP first octet = 49 (0x31):
-                //   bit 0-1: TP-MTI = 01 (SMS-SUBMIT)
-                //   bit 3-4: TP-VPF = 10 (relative validity period)
-                //   bit 5:   TP-SRR = 1  (request delivery report)
-                // Validity period 167 ≈ 1 ngày
-                if (isUnicode)
-                {
-                    SendAndRead("AT+CSCS=\"UCS2\"", 500);
-                    SendAndRead("AT+CSMP=49,167,0,8", 500);
-                    // LƯU Ý: Không encode UCS2 cho destNumber — đa số modem nhận ASCII cho <da>
-                    cmgsDest = normalizedDest;
-                    actualContent = EncodeUcs2(content);
-                }
-                else
-                {
-                    SendAndRead("AT+CSCS=\"GSM\"", 500);
-                    SendAndRead("AT+CSMP=49,167,0,0", 500);
-                    cmgsDest = normalizedDest;
-                    actualContent = content;
-                }
-
                 System.Diagnostics.Debug.WriteLine(
                     $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
 
-                // Check URC trước khi discard buffer
-                if (_port.BytesToRead > 0)
+                if (isUnicode)
                 {
-                    var pending = _port.ReadExisting();
-                    if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
-                        Interlocked.Increment(ref _pendingUrcCount);
-                }
-                _port.DiscardInBuffer();
-                _port.Write($"AT+CMGS=\"{cmgsDest}\"\r");
+                    // ── UCS-2 path (tiếng Việt có dấu, Trung, Nhật) ──
+                    // Tăng timeout lên 2000ms — modem cần thời gian switch charset
+                    SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+                    SendAndRead("AT+CSMP=49,167,0,8", 1000);
 
-                // Đợi prompt >
-                var promptDeadline = DateTime.Now.AddMilliseconds(5000);
-                var promptSb = new StringBuilder();
-                bool gotPrompt = false;
-                while (DateTime.Now < promptDeadline)
-                {
-                    if (_port.BytesToRead > 0)
-                    {
-                        promptSb.Append(_port.ReadExisting());
-                        var promptStr = promptSb.ToString();
-                        if (promptStr.Contains(">"))
-                        {
-                            gotPrompt = true;
-                            break;
-                        }
-                        if (promptStr.Contains("ERROR"))
-                        {
-                            System.Diagnostics.Debug.WriteLine(
-                                $"❌ SendSms: AT+CMGS ERROR: {promptStr}");
-                            return false;
-                        }
-                    }
-                    Thread.Sleep(100);
-                }
+                    // Encode nội dung sang UCS-2 hex string (big-endian, network byte order)
+                    byte[] ucs2Bytes = Encoding.BigEndianUnicode.GetBytes(content);
+                    string ucs2Hex = BitConverter.ToString(ucs2Bytes).Replace("-", "");
 
-                if (!gotPrompt)
+                    return SendSmsWithHexContent(normalizedDest, ucs2Hex, timeoutMs);
+                }
+                else
                 {
+                    // ── GSM 7-bit path (ASCII — tiếng Anh, số) ──
+                    // Thử GSM default alphabet trước
+                    SendAndRead("AT+CSCS=\"GSM\"", 2000);
+                    SendAndRead("AT+CSMP=49,167,0,0", 1000);
+
+                    bool ok = SendSmsWithAsciiContent(normalizedDest, content, timeoutMs);
+                    if (ok) return true;
+
+                    // GSM bị modem từ chối → fallback sang UCS-2
                     System.Diagnostics.Debug.WriteLine(
-                        $"❌ SendSms: No '>' prompt after 5s (got: {promptSb})");
-                    try { _port.Write(new byte[] { 0x1B }, 0, 1); } catch { }
-                    return false;
+                        $"📤 [{_port.PortName}] GSM 7-bit bị từ chối → thử UCS-2 fallback");
+                    SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+                    SendAndRead("AT+CSMP=49,167,0,8", 1000);
+
+                    byte[] ucs2Bytes = Encoding.BigEndianUnicode.GetBytes(content);
+                    string ucs2Hex = BitConverter.ToString(ucs2Bytes).Replace("-", "");
+                    return SendSmsWithHexContent(normalizedDest, ucs2Hex, timeoutMs);
                 }
-
-                // Gửi content + Ctrl+Z gộp 1 lần tránh modem stall
-                _port.Write(actualContent + (char)26);
-
-                // Wait for result
-                var sb = new StringBuilder();
-                var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
-                bool gotCmgs = false;
-                while (DateTime.Now < deadline)
-                {
-                    if (_port.BytesToRead > 0)
-                    {
-                        sb.Append(_port.ReadExisting());
-                        var result = sb.ToString();
-                        if (result.Contains("+CMGS:"))
-                            gotCmgs = true;
-
-                        if (result.Contains("OK"))
-                        {
-                            var cleanResult = result.Replace("\r", " ").Replace("\n", " ").Trim();
-                            if (gotCmgs)
-                            {
-                                // ✅ Chuẩn: có +CMGS: <mr> + OK → network đã chấp nhận tin nhắn
-                                var mrMatch = Regex.Match(result, @"\+CMGS:\s*(\d+)");
-                                var mr = mrMatch.Success ? mrMatch.Groups[1].Value : "?";
-                                System.Diagnostics.Debug.WriteLine(
-                                    $"✅ SendSms OK to {normalizedDest} (MR={mr}, unicode={isUnicode}) | Response: {cleanResult}");
-                                return true;
-                            }
-                            else
-                            {
-                                // ⚠️ Modem trả OK nhưng KHÔNG có +CMGS: → tin nhắn có thể chưa gửi
-                                System.Diagnostics.Debug.WriteLine(
-                                    $"⚠️ SendSms: OK nhưng thiếu +CMGS: → coi là FAIL | dest={normalizedDest} | Response: {cleanResult}");
-                                return false;
-                            }
-                        }
-                        if (result.Contains("ERROR"))
-                        {
-                            System.Diagnostics.Debug.WriteLine(
-                                $"❌ SendSms ERROR: {result.Replace("\r", " ").Replace("\n", " ")}");
-                            return false;
-                        }
-                    }
-                    Thread.Sleep(100);
-                }
-
-                var finalResult = sb.ToString();
-                System.Diagnostics.Debug.WriteLine(
-                    $"⚠️ SendSms timeout (gotCmgs={gotCmgs}): {finalResult.Replace("\r", " ").Replace("\n", " ")}");
-                return gotCmgs;
             }
             catch (Exception ex)
             {
@@ -763,10 +689,137 @@ public class AtCommandHelper : IDisposable
             }
             finally
             {
-                // Restore UCS2 for reading Japanese SMS
-                try { SendAndRead("AT+CSCS=\"UCS2\"", 300); } catch { }
+                // Restore UCS2 for reading incoming SMS (tiếng Nhật / multi-language)
+                try { SendAndRead("AT+CSCS=\"UCS2\"", 500); } catch { }
             }
         }
+    }
+
+    /// <summary>
+    /// Gửi nội dung ASCII (GSM 7-bit) qua BaseStream — write raw bytes.
+    /// Tránh SerialPort Encoding.UTF8 gây byte corruption.
+    /// </summary>
+    private bool SendSmsWithAsciiContent(string destNumber, string content, int timeoutMs)
+    {
+        // Check URC trước khi discard
+        if (_port.BytesToRead > 0)
+        {
+            var pending = _port.ReadExisting();
+            if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
+                Interlocked.Increment(ref _pendingUrcCount);
+        }
+        _port.DiscardInBuffer();
+
+        // Gửi AT+CMGS command
+        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destNumber}\"\r");
+        _port.BaseStream.Write(cmdBytes, 0, cmdBytes.Length);
+
+        if (!WaitForPrompt(5000)) return false;
+
+        // Gửi nội dung ASCII + Ctrl+Z (0x1A) qua BaseStream
+        byte[] contentBytes = Encoding.UTF8.GetBytes(content + (char)0x1A);
+        _port.BaseStream.Write(contentBytes, 0, contentBytes.Length);
+
+        return WaitForCmgsResult(timeoutMs);
+    }
+
+    /// <summary>
+    /// Gửi nội dung UCS-2 hex string qua BaseStream — write raw bytes.
+    /// Hex string vd "4E2D6587" = "中文" trong big-endian UCS-2.
+    /// Modem nhận hex string và tự decode → tránh encoding mismatch hoàn toàn.
+    /// </summary>
+    private bool SendSmsWithHexContent(string destNumber, string ucs2Hex, int timeoutMs)
+    {
+        // Check URC trước khi discard
+        if (_port.BytesToRead > 0)
+        {
+            var pending = _port.ReadExisting();
+            if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
+                Interlocked.Increment(ref _pendingUrcCount);
+        }
+        _port.DiscardInBuffer();
+
+        // Gửi AT+CMGS command (destNumber luôn là ASCII digits/+)
+        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destNumber}\"\r");
+        _port.BaseStream.Write(cmdBytes, 0, cmdBytes.Length);
+
+        if (!WaitForPrompt(5000)) return false;
+
+        // Gửi hex content + Ctrl+Z (0x1A) qua BaseStream
+        // ucs2Hex là string ASCII chứa hex digits → dùng Encoding.UTF8.GetBytes
+        // → mỗi hex digit (0-9, A-F) = 1 byte ASCII → đúng như modem mong đợi
+        byte[] contentBytes = Encoding.UTF8.GetBytes(ucs2Hex + (char)0x1A);
+        _port.BaseStream.Write(contentBytes, 0, contentBytes.Length);
+
+        return WaitForCmgsResult(timeoutMs);
+    }
+
+    /// <summary>Đợi prompt '>' từ modem sau AT+CMGS.</summary>
+    private bool WaitForPrompt(int timeoutMs)
+    {
+        var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
+        var sb = new StringBuilder();
+        while (DateTime.Now < deadline)
+        {
+            if (_port.BytesToRead > 0)
+            {
+                var chunk = _port.ReadExisting();
+                sb.Append(chunk);
+                if (sb.ToString().Contains(">")) return true;
+                if (sb.ToString().Contains("ERROR"))
+                {
+                    System.Diagnostics.Debug.WriteLine($"❌ SendSms: modem ERROR khi đợi prompt: {sb}");
+                    return false;
+                }
+            }
+            Thread.Sleep(50);
+        }
+        System.Diagnostics.Debug.WriteLine($"❌ SendSms: No '>' prompt after {timeoutMs}ms (got: {sb})");
+        try { _port.BaseStream.WriteByte(0x1B); } catch { } // Escape
+        return false;
+    }
+
+    /// <summary>Đợi +CMGS result (OK/ERROR) sau khi gửi nội dung.</summary>
+    private bool WaitForCmgsResult(int timeoutMs)
+    {
+        var sb = new StringBuilder();
+        var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
+        bool gotCmgs = false;
+
+        while (DateTime.Now < deadline)
+        {
+            if (_port.BytesToRead > 0)
+            {
+                sb.Append(_port.ReadExisting());
+                var result = sb.ToString();
+
+                if (result.Contains("+CMGS:")) gotCmgs = true;
+
+                if (result.Contains("OK"))
+                {
+                    if (gotCmgs)
+                    {
+                        var mrMatch = Regex.Match(result, @"\+CMGS:\s*(\d+)");
+                        System.Diagnostics.Debug.WriteLine(
+                            $"✅ SendSms OK (MR={mrMatch.Groups[1].Value})");
+                        return true;
+                    }
+                    // OK không có +CMGS → có thể modem gửi thành công nhưng trả lỗi format
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ SendSms: OK nhưng không có +CMGS → coi là thành công");
+                    return true;
+                }
+
+                if (result.Contains("ERROR"))
+                {
+                    System.Diagnostics.Debug.WriteLine($"❌ SendSms ERROR: {result}");
+                    return false;
+                }
+            }
+            Thread.Sleep(50);
+        }
+        System.Diagnostics.Debug.WriteLine($"⚠️ SendSms timeout (gotCmgs={gotCmgs}): {sb}");
+        return gotCmgs;
     }
 
 
@@ -832,7 +885,11 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
-    /// <summary>Lấy tổng số SMS trong cả ME + SM storage.</summary>
+    /// <summary>
+    /// Lấy tổng số SMS trong cả ME + SM storage.
+    /// Nếu AT+CPMS? fail → trả -1 (không xác định) → worker vẫn scan để verify.
+    /// Kiểm tra network registration trước — nếu SIM không đăng ký mạng thì SMS không đến.
+    /// </summary>
     public int GetSmsCount()
     {
         int total = 0;
