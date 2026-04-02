@@ -127,12 +127,23 @@ public class AtCommandHelper : IDisposable
     /// <summary>Lấy CCID (SIM card ID).</summary>
     public string? GetCcid()
     {
-        var resp = SendAndRead("AT+CCID", 2000);
-        if (string.IsNullOrWhiteSpace(resp)) return null;
+        // 🔥 FIX: retry 2 lần với timeout 5s — SIM chậm respond khi USB bus busy
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            var resp = SendAndRead("AT+CCID", attempt == 1 ? 5000 : 3000);
+            if (string.IsNullOrWhiteSpace(resp))
+            {
+                if (attempt < 3) Thread.Sleep(300);
+                continue;
+            }
 
-        // Parse: +CCID: 8981090040025215666F or just the number
-        var match = Regex.Match(resp, @"(\d{18,22}F?)", RegexOptions.IgnoreCase);
-        return match.Success ? match.Value : null;
+            // Parse: +CCID: 8981090040025215666F or just the number
+            var match = Regex.Match(resp, @"(\d{18,22}F?)", RegexOptions.IgnoreCase);
+            if (match.Success) return match.Value;
+
+            if (attempt < 3) Thread.Sleep(300);
+        }
+        return null;
     }
 
     /// <summary>Lấy IMSI.</summary>
@@ -267,6 +278,99 @@ public class AtCommandHelper : IDisposable
         "44011" => "Rakuten Mobile (JP)",
         _ => mccMnc,
     };
+
+    /// <summary>
+    /// 🔥 Extended phone detection — thử TẤT CẢ cách để lấy số SIM.
+    /// 1. CNUM (nhanh, ~1s)
+    /// 2. Phonebook entries 1-50 (trước: chỉ 1-5)
+    /// 3. CNUM retry 2 lần với delay (tháo SIM rồi cắm lại cần chờ settle)
+    /// 4. USSD code của nhà mạng (chậm ~10s, last resort)
+    /// </summary>
+    public string? DetectPhoneNumberExtended()
+    {
+        // 1. Try CNUM (nhanh, ~1s)
+        var phone = GetCnum();
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Phone via CNUM: {phone}");
+            return NormalizeNumber(phone);
+        }
+
+        // 2. Try phonebook entries 1-50 (trước: chỉ 1-5 — bỏ sót nếu số nằm ở slot >5)
+        phone = ReadPhonebookAllEntries();
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Phone via Phonebook extended: {phone}");
+            return NormalizeNumber(phone);
+        }
+
+        // 3. Retry CNUM sau 1s delay (SIM có thể chưa settle sau khi cắm)
+        Thread.Sleep(1000);
+        phone = GetCnum();
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Phone via CNUM (retry): {phone}");
+            return NormalizeNumber(phone);
+        }
+
+        // 4. USSD last resort (chậm ~10s)
+        System.Diagnostics.Debug.WriteLine($"📞 [{_port.PortName}] CNUM+CPBR fail → trying USSD...");
+        phone = QueryPhoneByUssd();
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Phone via USSD: {phone}");
+            // Ghi vào phonebook để lần scan sau không cần USSD nữa
+            try { WritePhoneToSimPhonebook(phone); } catch { }
+            return NormalizeNumber(phone);
+        }
+
+        System.Diagnostics.Debug.WriteLine($"❌ [{_port.PortName}] Không thể detect số ĐT bằng AT commands");
+        return null;
+    }
+
+    /// <summary>Đọc TẤT CẢ phonebook entries (thay vì chỉ 1-5).</summary>
+    public string? ReadPhonebookAllEntries()
+    {
+        try
+        {
+            // Đầu tiên: đọc entry 1-20 (đủ cho đa số SIM)
+            SendAndRead("AT+CPBS=\"SM\"", 500);
+            var resp = SendAndRead("AT+CPBR=1,20", 3000);
+
+            // Tìm TẤT CẢ số điện thoại trong response
+            var matches = Regex.Matches(resp, @"""(\+?\d{8,15})""");
+            foreach (Match m in matches)
+            {
+                var num = m.Groups[1].Value;
+                if (!string.IsNullOrWhiteSpace(num) && num.Length >= 8)
+                {
+                    System.Diagnostics.Debug.WriteLine($"📱 Phonebook entry found: {num}");
+                    return num;
+                }
+            }
+
+            // Thử tiếp entries 21-50 nếu 1-20 không có gì
+            if (matches.Count == 0)
+            {
+                resp = SendAndRead("AT+CPBR=21,50", 3000);
+                matches = Regex.Matches(resp, @"""(\+?\d{8,15})""");
+                foreach (Match m in matches)
+                {
+                    var num = m.Groups[1].Value;
+                    if (!string.IsNullOrWhiteSpace(num) && num.Length >= 8)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"📱 Phonebook entry (21-50) found: {num}");
+                        return num;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ ReadPhonebookAllEntries failed: {ex.Message}");
+        }
+        return null;
+    }
 
     /// <summary>Phát hiện số điện thoại (CNUM → phonebook → null).
     /// USSD KHÔNG chạy ở đây vì quá chậm (12-24s/SIM) → gọi riêng QueryPhoneByUssd() sau scan.</summary>
@@ -741,15 +845,10 @@ public class AtCommandHelper : IDisposable
             foreach (Match m in matches)
             {
                 if (int.TryParse(m.Groups[1].Value, out var count))
-                {
                     total += count;
-                    break; // Chỉ lấy storage đầu tiên (read storage)
-                }
             }
 
-            // Nếu parse được từ +CPMS?, return luôn
-            if (matches.Count > 0)
-                return total;
+            if (total > 0) return total;
 
             // Fallback: thử check từng storage riêng
             foreach (var storage in new[] { "ME", "SM" })

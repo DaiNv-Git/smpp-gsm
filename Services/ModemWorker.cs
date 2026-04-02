@@ -108,68 +108,59 @@ public class ModemWorker : IDisposable
     {
         System.Diagnostics.Debug.WriteLine($"▶️ ModemWorker started: {_sim.ComPort}");
 
+        // 🔥 FIX: Poll SMS count mỗi 2 giây — bỏ URC vì không đáng tin cậy và gây lặp SMS
+        // URC bị miss: modem chỉ bắn 1 lần rồi tự reset, đợi next SMS mới bắn tiếp
+        // URC bị trùng: nhiều SMS đến gần nhau → bị gộp thành 1 CMTI → scan thiếu
+
         while (IsRunning && !_cts.Token.IsCancellationRequested)
         {
             try
             {
-                bool hasNewSms = false;
-
-                // Ưu tiên URC khi modem có phát
-                if (_urcSupported)
-                    hasNewSms = _helper.CheckForNewSms();
-
-                // 🔥 FIX: Luôn scan khi count > 0 — duplicate được filter bởi _processedSmsCache (TTL 60 phút)
-                // Cũ: count != _lastSmsCount → bỏ sót SMS khi count giữ nguyên (1 đến + 1 xóa cùng lúc)
-                if (!hasNewSms &&
-                    (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds >= SmsScanIntervalMs)
+                // 1. Poll SMS count — LUÔN LUÔN kiểm tra định kỳ mỗi 2 giây
+                var elapsed = (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds;
+                if (elapsed >= SmsScanIntervalMs)
                 {
                     _lastSmsCountCheck = DateTime.Now;
                     var currentCount = _helper.GetSmsCount();
-                    if (currentCount > 0)
-                    {
-                        if (currentCount != _lastSmsCount)
-                        {
-                            System.Diagnostics.Debug.WriteLine(
-                                $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
-                        }
-                        _lastSmsCount = currentCount;
-                        hasNewSms = true;
-                    }
-                    else if (currentCount == 0 && _lastSmsCount > 0)
-                    {
-                        _lastSmsCount = 0; // Reset baseline
-                    }
-                }
 
-                if (hasNewSms)
-                {
-                    ReadIncomingSms();
+                    // Scan khi: count tăng HOẶC count > baseline (SMS đến rồi bị xóa đúng lúc poll)
+                    bool shouldScan = false;
 
-                    // 🔥 Re-check ngay: SMS có thể đến trong lúc đang scan (10s+ dual-storage)
-                    // Loop tối đa 2 lần tránh infinite loop
-                    for (int recheck = 0; recheck < 2; recheck++)
+                    if (currentCount > _lastSmsCount)
                     {
-                        if (_helper.CheckForNewSms())
-                        {
-                            System.Diagnostics.Debug.WriteLine(
-                                $"📬 [{_sim.ComPort}] Re-check #{recheck + 1}: thêm SMS mới đến trong lúc scan!");
-                            ReadIncomingSms();
-                        }
-                        else break;
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📬 [{_sim.ComPort}] SMS count tăng: {_lastSmsCount} → {currentCount}");
+                        shouldScan = true;
+                    }
+                    else if (currentCount > 0 && _lastSmsCount >= 0)
+                    {
+                        // count > 0 nhưng bằng last → có thể SMS đến rồi bị xóa giữa 2 poll
+                        // scan để chắc chắn không bỏ sót
+                        shouldScan = true;
+                    }
+
+                    _lastSmsCount = currentCount;
+
+                    if (shouldScan)
+                    {
+                        ReadIncomingSms();
                     }
                 }
 
-                // Process send queue — giảm block time từ 500ms → 100ms
-                // để poll incoming SMS thường xuyên hơn
+                // 2. Process send queue — non-blocking, không chờ để không block poll cycle
+                // 🔥 FIX: Nếu không có task, ngủ NGẮN (100ms) để poll kịp thời
+                // Trước: block 30s khi gửi SMS → bỏ lỡ SMS đến trong lúc gửi
                 if (_queue.TryTake(out var task, 100, _cts.Token))
                 {
                     ProcessSmsTask(task);
 
-                    // 🔥 Check incoming SMS ngay sau khi gửi xong (không đợi poll cycle tiếp)
-                    // Fix: cũ block 30s+ khi gửi → bỏ lỡ incoming SMS
-                    if (_helper.CheckForNewSms())
+                    // 🔥 Check SMS ngay sau gửi xong — có thể có SMS đến trong lúc đang gửi
+                    // (SMS count đã được update trong ReadIncomingSms nếu có)
+                    _lastSmsCount = _helper.GetSmsCount();
+                    if (_lastSmsCount > 0)
                         ReadIncomingSms();
                 }
+                // else: không có task → loop quay lại ngay, không block ở đây
             }
             catch (OperationCanceledException)
             {
@@ -323,7 +314,7 @@ public class ModemWorker : IDisposable
     /// 1. Dual storage: scan cả ME + SM
     /// 2. Chỉ đọc UNREAD (không dùng ALL)
     /// 3. Periodic cleanup mỗi 20 scans — xóa tất cả tin đã đọc
-    /// 4. TTL-based duplicate cache (5 phút)
+    /// 4. TTL-based duplicate cache (60 phút)
     /// </summary>
     private void ReadIncomingSms()
     {
@@ -351,12 +342,8 @@ public class ModemWorker : IDisposable
             }
 
             var allMessages = new List<(string storage, int index, string sender, string content, DateTime time)>();
-            var scannedStorages = new HashSet<string>(StringComparer.Ordinal);
 
-            // Set text mode + UCS2 charset 1 lần trước khi scan
-            _helper.PrepareForRead();
-
-            // 🔥 Chỉ đọc UNREAD — không fallback ALL
+            // 🔥 Scan cả ME + SM storage — mỗi storage cần PrepareForRead riêng
             foreach (var storage in new[] { "ME", "SM" })
             {
                 try
@@ -368,8 +355,9 @@ public class ModemWorker : IDisposable
                         continue;
                     }
 
-                    scannedStorages.Add(storage);
-                    var smsInStore = _helper.ListUnreadSms(3000); // 🔥 Giảm timeout từ 5000 → 3000ms
+                    // 🔥 FIX: Gọi PrepareForRead TRƯỚC mỗi storage — modem có thể reset mode khi switch storage
+                    _helper.PrepareForRead();
+                    var smsInStore = _helper.ListUnreadSms(5000);
 
                     allMessages.AddRange(smsInStore.Select(m => (storage, m.index, m.sender, m.content, m.time)));
                     if (smsInStore.Count > 0)
@@ -386,7 +374,11 @@ public class ModemWorker : IDisposable
             }
 
             if (allMessages.Count == 0)
+            {
+                // Không có SMS → vẫn update baseline count để tránh spam scan
+                _lastSmsCount = Math.Max(0, _lastSmsCount);
                 return;
+            }
 
             int processedCount = 0;
 
@@ -401,6 +393,8 @@ public class ModemWorker : IDisposable
                 if (_helper.SetStorage(storage))
                 {
                     activeStorage = storage;
+                    // Re-prepare sau khi switch storage
+                    _helper.PrepareForRead();
                     return true;
                 }
 
@@ -443,16 +437,13 @@ public class ModemWorker : IDisposable
                     _helper.DeleteSms(index);
             }
 
-            // 🔥 Bỏ CleanupReadSms() sau mỗi scan — chỉ giữ periodic cleanup (mỗi 20 scans)
-            // Fix: AT+CMGD=1,3 có thể xóa SMS mới đến trong lúc đang scan
-
-            // Luôn update count baseline sau scan (không chỉ khi processedCount > 0)
-            // để tránh race condition khi SMS mới đến đúng lúc scan
-            _lastSmsCount = Math.Max(0, _helper.GetSmsCount());
+            // 🔥 Luôn update count baseline sau scan — để next poll cycle không re-scan
+            // Dùng count từ storage cuối cùng đã scan (chính xác hơn gọi GetSmsCount riêng)
+            _lastSmsCount = 0; // Sau khi xóa hết unread trong list → count về 0
             if (processedCount > 0)
             {
                 System.Diagnostics.Debug.WriteLine(
-                    $"✅ [{_sim.ComPort}] Processed {processedCount}/{allMessages.Count} SMS (remaining: {_lastSmsCount})");
+                    $"✅ [{_sim.ComPort}] Processed {processedCount}/{allMessages.Count} SMS");
             }
         }
         catch (Exception ex)

@@ -77,51 +77,44 @@ public class SerialPortManager : IDisposable
             var newSims = new ConcurrentBag<SimCard>();
             var failedPorts = new ConcurrentBag<string>();
             int pass1Ok = 0;
+            int retryOk = 0;
 
-            // Pass 1: Scan parallel — fire SimScanned immediately for realtime UI
-            var tasks = portNames.Select(port => Task.Run(() =>
+            // 🔥 FIX: Scan SEQUENTIAL thay vì parallel full
+            // Parallel 31 port cùng lúc gây USB contention → nhiều port bị timeout
+            // Scan tuần tự + retry ngay lập tức (Pass 2 trong vòng for) → ổn định hơn nhiều
+            foreach (var port in portNames)
             {
-                var sim = ScanOnePort(port);
+                var sim = await Task.Run(() => ScanOnePort(port));
+
                 if (sim != null)
                 {
                     newSims.Add(sim);
-                    Interlocked.Increment(ref pass1Ok);
-                    // 🔥 Progressive loading: push SIM to UI immediately
+                    pass1Ok++;
                     SimScanned?.Invoke(sim);
                     System.Diagnostics.Debug.WriteLine(
                         $"✅ {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"} Provider={sim.Provider}");
                 }
                 else
                 {
-                    failedPorts.Add(port);
-                }
-            }));
+                    // Pass 2: retry NGAY cho port này trước khi sang port kế tiếp
+                    // (không retry tất cả failed cùng lúc như trước)
+                    await Task.Delay(300);
+                    sim = await Task.Run(() => ScanOnePort(port));
 
-            await Task.WhenAll(tasks);
-
-            // Pass 2: Retry failed ports (like old Java system)
-            int retryOk = 0;
-            if (failedPorts.Count > 0)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"🔁 SECOND PASS: {failedPorts.Count} ports chưa scan được, retry...");
-                await Task.Delay(300);
-
-                var retryTasks = failedPorts.Select(port => Task.Run(() =>
-                {
-                    var sim = ScanOnePort(port);
                     if (sim != null)
                     {
                         newSims.Add(sim);
-                        Interlocked.Increment(ref retryOk);
-                        // 🔥 Progressive: push retry results to UI too
+                        retryOk++;
                         SimScanned?.Invoke(sim);
                         System.Diagnostics.Debug.WriteLine(
                             $"✅ [RETRY] {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"}");
                     }
-                }));
-
-                await Task.WhenAll(retryTasks);
+                    else
+                    {
+                        failedPorts.Add(port);
+                        System.Diagnostics.Debug.WriteLine($"❌ {port}: scan thất bại sau 2 lần");
+                    }
+                }
             }
 
             // Update cache
@@ -159,23 +152,55 @@ public class SerialPortManager : IDisposable
         }
     }
 
+    /// <summary>Thử nhiều baud rate phổ biến để open port thành công.
+    /// Fix: modem có thể hardcoded baud 9600 thay vì 115200.</summary>
+    private AtCommandHelper? TryOpenPort(string comPort, int preferredBaud)
+    {
+        // Thử preferred baud trước, rồi các baud phổ biến khác
+        int[] baudRates = { preferredBaud, 115200, 9600, 4800, 19200, 38400 };
+        baudRates = baudRates.Distinct().ToArray();
+
+        foreach (var baud in baudRates)
+        {
+            var helper = new AtCommandHelper(comPort, baud);
+            try
+            {
+                if (helper.Open() && helper.IsAlive())
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"🔌 [{comPort}] Opened @ baud {baud}");
+                    return helper;
+                }
+            }
+            catch
+            {
+                // Baud này không được, thử baud tiếp theo
+            }
+            finally
+            {
+                if (!helper.IsOpen) helper.Dispose();
+            }
+        }
+        return null;
+    }
+
     private SimCard? ScanOnePort(string comPort)
     {
-        using var helper = new AtCommandHelper(comPort, _settings.BaudRate);
+        // 🔥 FIX: Thử nhiều baud rate — modem có thể hardcoded 9600
+        using var helper = TryOpenPort(comPort, _settings.BaudRate);
+        if (helper == null) return null;
+
         try
         {
-            if (!helper.Open()) return null;
-            if (!helper.IsAlive()) return null;
-
-            // 1. CCID (required)
-            var ccid = helper.GetCcid();
+            // 1. CCID (required) — kiểm tra SIM có thật sự cắm không
+            var ccid = helper!.GetCcid();
             if (string.IsNullOrWhiteSpace(ccid)) return null;
 
             // 2. IMSI
-            var imsi = helper.GetImsi();
+            var imsi = helper!.GetImsi();
 
-            // 3. Phone number — AT command first
-            var phone = helper.DetectPhoneNumber();
+            // 3. Phone number — thử nhiều cách (CNUM → phonebook entries → network registration)
+            var phone = helper!.DetectPhoneNumberExtended();
 
             // 4. Fallback: query MongoDB trực tiếp (ưu tiên) hoặc BE API
             // Giống cơ chế của SimSyncService.java: AT command → DB fallback
@@ -196,7 +221,7 @@ public class SerialPortManager : IDisposable
                                 $"📱 [{comPort}] Số từ MongoDB: {phone} (CCID fuzzy match)");
 
                             // Ghi số vào SIM phonebook để lần sau AT command đọc được
-                            try { helper.WritePhoneToSimPhonebook(phone); }
+                            try { helper!.WritePhoneToSimPhonebook(phone); }
                             catch { /* ignore */ }
                         }
                     }
@@ -230,14 +255,14 @@ public class SerialPortManager : IDisposable
             }
 
             // 5. Signal level
-            var signal = helper.GetSignalLevel();
+            var signal = helper!.GetSignalLevel();
 
             // 6. Provider — IMSI prefix first (giống Java cũ), AT+COPS? là fallback
             // Lý do: AT+COPS? trả về mạng đang kết nối (có thể roaming KDDI)
             //        IMSI prefix trả về nhà mạng phát hành SIM (Docomo/Rakuten) → đúng hơn
             provider ??= AtCommandHelper.DetectProvider(imsi);
             if (provider == "Unknown")
-                provider = helper.QueryOperator() ?? "Unknown";
+                provider = helper!.QueryOperator() ?? "Unknown";
 
             return new SimCard
             {
