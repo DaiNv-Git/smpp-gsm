@@ -528,6 +528,22 @@
                                 </Border>
                             </StackPanel>
                         </Button>
+
+                        <!-- Spacer -->
+                        <Border Width="1" Background="{StaticResource BorderSubtleBrush}" Margin="8,2"/>
+
+                        <!-- Xóa tin nhắn -->
+                        <Button Command="{Binding ClearMessagesCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ModernButton}">
+                                    <Setter Property="Padding" Value="12,6"/>
+                                    <Setter Property="FontSize" Value="11"/>
+                                    <Setter Property="Margin" Value="0,0,6,0"/>
+                                    <Setter Property="Background" Value="#30363d"/>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock Text="🧹 Xóa tất cả"/>
+                        </Button>
                     </StackPanel>
 
                     <!-- Message DataGrid -->

@@ -34,6 +34,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _incomingCount;
     [ObservableProperty] private int _outgoingCount;
     [ObservableProperty] private int _failedCount;
+    private DateTime _lastMessageResetDate = DateTime.Today;
     [ObservableProperty] private string _mongoStatus = "Chưa kết nối";
     [ObservableProperty] private SolidColorBrush _mongoStatusColor = Brushes.Gray;
     [ObservableProperty] private bool _isNotificationVisible;
@@ -509,13 +510,21 @@ public partial class MainViewModel : ObservableObject
 
     private void UpdateStats()
     {
+        // 🔥 Auto-reset tin nhắn cuối ngày (0:00)
+        if (_lastMessageResetDate.Date < DateTime.Today)
+        {
+            _lastMessageResetDate = DateTime.Today;
+            MessageList.Clear();
+            Logger.Info("🔄 Auto-reset MessageList cuối ngày");
+        }
+
         OnlineSimCount = SimList.Count(s => s.Status == SimStatus.Online || s.Status == SimStatus.Busy);
         TotalQueueSize = SimList.Sum(s => s.QueueSize);
-        // 🔥 FIX: Đếm từ MessageList (chính xác) — bao gồm cả SMS manual + worker
         TotalSentCount = MessageList.Count(m =>
             m.Direction == "OUT" && (m.Status == "SENT" || m.Status == "DELIVERED"));
         RateLimitedCount = SimList.Count(s => s.IsRateLimited);
-        MissingPhoneCount = SimList.Count(s => string.IsNullOrWhiteSpace(s.PhoneNumber) && s.Status != SimStatus.Offline && s.Status != SimStatus.Error);
+        // 🔥 FIX: Đếm TẤT CẢ SIM thiếu số điện thoại (kể cả chưa kết nối worker)
+        MissingPhoneCount = SimList.Count(s => string.IsNullOrWhiteSpace(s.PhoneNumber));
         UpdateMessageCounts();
     }
 
@@ -524,6 +533,14 @@ public partial class MainViewModel : ObservableObject
         IncomingCount = MessageList.Count(m => m.Direction == "IN");
         OutgoingCount = MessageList.Count(m => m.Direction == "OUT");
         FailedCount = MessageList.Count(m => m.Status == "FAILED");
+    }
+
+    [RelayCommand]
+    private void ClearMessages()
+    {
+        MessageList.Clear();
+        UpdateStats();
+        StatusMessage = "🧹 Đã xóa tất cả tin nhắn";
     }
 
     [RelayCommand]
