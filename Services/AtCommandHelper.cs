@@ -393,7 +393,7 @@ public class AtCommandHelper : IDisposable
         }
 
         // 3. Try USSD (chậm ~10s, chỉ dùng khi CNUM+CPBR fail)
-        System.Diagnostics.Debug.WriteLine($"📞 [{_portName}] CNUM+CPBR failed → trying USSD...");
+        System.Diagnostics.Debug.WriteLine($"📞 [{_port.PortName}] CNUM+CPBR failed → trying USSD...");
         phone = QueryPhoneByUssd();
         if (!string.IsNullOrWhiteSpace(phone))
         {
@@ -403,7 +403,7 @@ public class AtCommandHelper : IDisposable
             return NormalizeNumber(phone);
         }
 
-        System.Diagnostics.Debug.WriteLine($"❌ [{_portName}] Không thể detect số ĐT bằng AT commands");
+        System.Diagnostics.Debug.WriteLine($"❌ [{_port.PortName}] Không thể detect số ĐT bằng AT commands");
         return null;
     }
 
@@ -431,7 +431,7 @@ public class AtCommandHelper : IDisposable
                 if (resp.Contains("+CUSD:"))
                 {
                     // Extract quoted content
-                    var m = Regex.Match(resp, @"\+CUSD:\s*\d+,\"([^\"]+)\"");
+                    var m = Regex.Match(resp, @"\+CUSD:\s*\d+,""([^""]+)""");
                     if (m.Success)
                     {
                         var ussdContent = DecodeUcs2IfNeeded(m.Groups[1].Value);
@@ -452,7 +452,7 @@ public class AtCommandHelper : IDisposable
                 if (_port.BytesToRead > 0)
                 {
                     var extra = _port.ReadExisting();
-                    var em = Regex.Match(extra, @"\+CUSD:\s*\d+,\"([^\"]+)\"");
+                    var em = Regex.Match(extra, @"\+CUSD:\s*\d+,""([^""]+)""");
                     if (em.Success)
                     {
                         var ussdContent = DecodeUcs2IfNeeded(em.Groups[1].Value);
@@ -479,28 +479,28 @@ public class AtCommandHelper : IDisposable
     /// <summary>Map IMSI prefix → USSD codes để query số điện thoại.</summary>
     private static string[] GetUssdCodesForCarrier(string? imsi)
     {
-        if (string.IsNullOrWhiteSpace(imsi)) return [];
+        if (string.IsNullOrWhiteSpace(imsi)) return Array.Empty<string>();
 
         // NTT Docomo
-        if (imsi.StartsWith("44010")) return ["*#100#"];
+        if (imsi.StartsWith("44010")) return new[] { "*#100#" };
         // Rakuten Mobile
-        if (imsi.StartsWith("44011")) return ["*543#", "*#100#"];
+        if (imsi.StartsWith("44011")) return new[] { "*543#", "*#100#" };
         // SoftBank / Y!mobile
         if (imsi.StartsWith("44020") || imsi.StartsWith("44000") ||
             imsi.StartsWith("44001") || imsi.StartsWith("44002") || imsi.StartsWith("44003"))
-            return ["*5555#"];
+            return new[] { "*5555#" };
         // KDDI/AU
         if (imsi.StartsWith("44050") || imsi.StartsWith("44051") ||
             imsi.StartsWith("44053") || imsi.StartsWith("44054"))
-            return ["*5491#"];
+            return new[] { "*5491#" };
         // Viettel (VN)
-        if (imsi.StartsWith("45204") || imsi.StartsWith("45205")) return ["*098#"];
+        if (imsi.StartsWith("45204") || imsi.StartsWith("45205")) return new[] { "*098#" };
         // Mobifone (VN)
-        if (imsi.StartsWith("45201")) return ["*0#"];
+        if (imsi.StartsWith("45201")) return new[] { "*0#" };
         // Vinaphone (VN)
-        if (imsi.StartsWith("45202")) return ["*110#"];
+        if (imsi.StartsWith("45202")) return new[] { "*110#" };
 
-        return [];
+        return Array.Empty<string>();
     }
 
     /// <summary>Ghi số điện thoại vào SIM phonebook (SM) để scan nhanh hơn lần sau.</summary>
