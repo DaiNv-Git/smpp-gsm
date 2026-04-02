@@ -461,20 +461,36 @@ public class ModemWorker : IDisposable
         }
     }
 
-    private static string[] BuildDuplicateKeys(string sender, string content, DateTime time)
+    /// <summary>
+    /// Build duplicate keys cho SMS.
+    /// 🔥 FIX: Bỏ fuzzy bucket (yyyyMMddHHmm) vì nó gộp TẤT CẢ SMS cùng sender+content trong 1 phút
+    /// → gửi 5 tin cùng nội dung chỉ nhận 1! 
+    /// Mới: dùng exact timestamp (giây) + thêm storage index cho within-scan dedup.
+    /// </summary>
+    private static string[] BuildDuplicateKeys(string sender, string content, DateTime time, string? storageIndex = null)
     {
         var normalizedSender = NormalizeSender(sender);
         var normalizedContent = NormalizeContent(content);
         var exactTime = time.ToUniversalTime().ToString("yyyyMMddHHmmss");
 
-        // Một số modem duplicate cùng SMS giữa ME/SM nhưng timestamp lệch nhẹ vài chục giây.
-        var fuzzyBucket = time.ToUniversalTime().ToString("yyyyMMddHHmm");
+        var keys = new List<string>
+        {
+            // Key 1: Exact match (sender + content + giây chính xác)
+            $"{normalizedSender}|{normalizedContent}|{exactTime}"
+        };
 
-        return
-        [
-            $"{normalizedSender}|{normalizedContent}|{exactTime}",
-            $"{normalizedSender}|{normalizedContent}|{fuzzyBucket}"
-        ];
+        // Key 2: Cross-storage dedup (ME vs SM cùng SMS, timestamp lệch 1-2 giây)
+        // Chỉ dùng nếu content ngắn (OTP, có khả năng trùng thật giữa ME/SM)
+        // Với content dài hoặc khác nhau → key exact đã đủ
+        if (normalizedContent.Length <= 20)
+        {
+            // Bucket 10 giây (thay vì 1 phút) — đủ bắt ME/SM lệch nhưng không quá rộng
+            var bucket10s = time.ToUniversalTime();
+            bucket10s = bucket10s.AddSeconds(-(bucket10s.Second % 10));
+            keys.Add($"{normalizedSender}|{normalizedContent}|{bucket10s:yyyyMMddHHmmss}");
+        }
+
+        return keys.ToArray();
     }
 
     private static string NormalizeSender(string sender)

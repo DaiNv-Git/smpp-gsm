@@ -93,8 +93,16 @@ public class AtCommandHelper : IDisposable
                         var resp = sb.ToString();
                         if (resp.Contains("+CMTI:") || resp.Contains("+CMT:"))
                             Interlocked.Increment(ref _pendingUrcCount);
-                        if (resp.Contains("OK") || resp.Contains("ERROR"))
+                            
+                        // 🔥 FIX: Chỉ break khi OK hoặc ERROR là DÒNG CUỐI CÙNG của response
+                        // Tránh trường hợp nội dung SMS chứa chữ "OK" và bị ngắt ngang giữa chừng
+                        if (Regex.IsMatch(resp, @"\r\n(?:OK|ERROR)\r\n$") ||
+                            resp.EndsWith("\r\nOK\r\n") || resp.EndsWith("\r\nERROR\r\n") ||
+                            (resp.StartsWith("OK\r\n") && resp.Length < 10) || 
+                            (resp.StartsWith("ERROR\r\n") && resp.Length < 10))
+                        {
                             break;
+                        }
                     }
                     Thread.Sleep(50);
                 }
