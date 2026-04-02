@@ -134,7 +134,19 @@ public class SimSyncService : IDisposable
             }
 
             // 2️⃣ Load tất cả SIM từ DB
-            var allDbSims = _mongoDb.FindAll();
+            List<SimDocument> allDbSims;
+            try
+            {
+                allDbSims = _mongoDb.FindAll();
+                Logger.Info($"📦 Loaded {allDbSims.Count} SIM từ MongoDB");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"❌ FindAll() FAILED: {ex.GetType().Name}: {ex.Message}");
+                Logger.Error($"   Stack: {ex.StackTrace?.Split('\n').FirstOrDefault()}");
+                // Fallback: tạo list rỗng → tất cả SIM sẽ được tạo mới
+                allDbSims = new List<SimDocument>();
+            }
 
             // Map theo CCID để tìm nhanh
             var dbMapByCcid = allDbSims
@@ -266,7 +278,7 @@ public class SimSyncService : IDisposable
     {
         return new SimDocument
         {
-            Id = MongoDB.Bson.ObjectId.GenerateNewId().ToString(),
+            Id = Guid.NewGuid().ToString(),
             Ccid = sim.Ccid,
             Imsi = sim.Imsi,
             PhoneNumber = !string.IsNullOrWhiteSpace(sim.PhoneNumber)

@@ -1,18 +1,21 @@
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Bson.Serialization.Serializers;
 
 namespace GsmAgent.Models;
 
 /// <summary>
 /// MongoDB document mapping cho collection "sims".
 /// Tương thích 100% với Sim.java entity trong simsmart-gsm (Java).
+/// Java dùng UUID.randomUUID().toString() cho @Id → _id là String.
 /// </summary>
 [BsonIgnoreExtraElements]
 public class SimDocument
 {
     [BsonId]
-    [BsonSerializer(typeof(StringObjectIdBsonSerializer))]
-    public string Id { get; set; } = ObjectId.GenerateNewId().ToString();
+    [BsonSerializer(typeof(FlexibleIdSerializer))]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
 
     [BsonElement("phoneNumber")]
     public string? PhoneNumber { get; set; }
@@ -69,34 +72,26 @@ public class SimDocument
     public string? JavaClass { get; set; }
 }
 
-public class StringObjectIdBsonSerializer : MongoDB.Bson.Serialization.Serializers.SerializerBase<string>
+/// <summary>
+/// Custom serializer cho _id: ĐỌC được cả ObjectId lẫn String, GHI ra String.
+/// Tương thích cả Java UUID lẫn MongoDB native ObjectId.
+/// </summary>
+public class FlexibleIdSerializer : SerializerBase<string>
 {
-    public override string Deserialize(MongoDB.Bson.Serialization.BsonDeserializationContext context, MongoDB.Bson.Serialization.BsonDeserializationArgs args)
+    public override string Deserialize(BsonDeserializationContext context, BsonDeserializationArgs args)
     {
         var bsonType = context.Reader.GetCurrentBsonType();
-        if (bsonType == BsonType.ObjectId)
+        return bsonType switch
         {
-            return context.Reader.ReadObjectId().ToString();
-        }
-        else if (bsonType == BsonType.String)
-        {
-            return context.Reader.ReadString();
-        }
-        else
-        {
-            throw new FormatException($"Cannot deserialize string from BsonType {bsonType}");
-        }
+            BsonType.String => context.Reader.ReadString(),
+            BsonType.ObjectId => context.Reader.ReadObjectId().ToString(),
+            _ => throw new FormatException($"Cannot deserialize _id from BsonType {bsonType}")
+        };
     }
 
-    public override void Serialize(MongoDB.Bson.Serialization.BsonSerializationContext context, MongoDB.Bson.Serialization.BsonSerializationArgs args, string value)
+    public override void Serialize(BsonSerializationContext context, BsonSerializationArgs args, string value)
     {
-        if (ObjectId.TryParse(value, out var objectId))
-        {
-            context.Writer.WriteObjectId(objectId);
-        }
-        else
-        {
-            context.Writer.WriteString(value);
-        }
+        // Luôn ghi String — giống Java UUID.randomUUID().toString()
+        context.Writer.WriteString(value);
     }
 }
