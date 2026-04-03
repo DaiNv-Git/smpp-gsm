@@ -290,6 +290,54 @@ public class AtCommandHelper : IDisposable
     };
 
     /// <summary>
+    /// ⚡ Fast phone detection — CHỈ dùng khi scan (tốc độ ưu tiên).
+    /// 1. CNUM (1 lần, 2s timeout)
+    /// 2. Phonebook entries 1-5 (nhanh)
+    /// Không retry CNUM, không USSD, không phonebook extended.
+    /// Các cách chậm hơn sẽ chạy sau scan (Self-SMS Discovery / DetectPhoneNumberExtended).
+    /// </summary>
+    public string? DetectPhoneNumberFast()
+    {
+        // 1. Try CNUM (1 lần duy nhất, 2s timeout)
+        try
+        {
+            var resp = SendAndRead("AT+CNUM", 2000);
+            if (!string.IsNullOrWhiteSpace(resp) && resp.Trim() != "OK")
+            {
+                var m = Regex.Match(resp, @"\+?CNUM:.*?""(\+?\d{6,20})""");
+                if (m.Success)
+                {
+                    System.Diagnostics.Debug.WriteLine($"⚡ Phone via CNUM (fast): {m.Groups[1].Value}");
+                    return NormalizeNumber(m.Groups[1].Value);
+                }
+                m = Regex.Match(resp, @"\+?CNUM:.*?(\+?\d{6,20})");
+                if (m.Success)
+                {
+                    System.Diagnostics.Debug.WriteLine($"⚡ Phone via CNUM pattern2 (fast): {m.Groups[1].Value}");
+                    return NormalizeNumber(m.Groups[1].Value);
+                }
+            }
+        }
+        catch { /* skip */ }
+
+        // 2. Try phonebook entries 1-5 (nhanh, ~1s)
+        try
+        {
+            SendAndRead("AT+CPBS=\"SM\"", 500);
+            var resp = SendAndRead("AT+CPBR=1,5", 2000);
+            var match = Regex.Match(resp, @"""(\+?\d{8,15})""");
+            if (match.Success)
+            {
+                System.Diagnostics.Debug.WriteLine($"⚡ Phone via Phonebook (fast): {match.Groups[1].Value}");
+                return NormalizeNumber(match.Groups[1].Value);
+            }
+        }
+        catch { /* skip */ }
+
+        return null;
+    }
+
+    /// <summary>
     /// 🔥 Extended phone detection — thử TẤT CẢ cách để lấy số SIM.
     /// 1. CNUM (nhanh, ~1s)
     /// 2. Phonebook entries 1-50 (trước: chỉ 1-5)

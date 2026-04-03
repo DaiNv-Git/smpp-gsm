@@ -403,6 +403,7 @@
                                         <DataTemplate>
                                             <TextBox Text="{Binding PhoneNumber, Mode=OneWay}" 
                                                      IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Padding="0" Margin="0" MinHeight="0" VerticalAlignment="Center"
                                                      Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
                                                      VerticalContentAlignment="Center" Cursor="IBeam"/>
                                         </DataTemplate>
@@ -415,6 +416,7 @@
                                         <DataTemplate>
                                             <TextBox Text="{Binding Ccid, Mode=OneWay}" 
                                                      IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Padding="0" Margin="0" MinHeight="0" VerticalAlignment="Center"
                                                      Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
                                                      VerticalContentAlignment="Center" Cursor="IBeam"/>
                                         </DataTemplate>
@@ -425,6 +427,7 @@
                                         <DataTemplate>
                                             <TextBox Text="{Binding Imsi, Mode=OneWay}" 
                                                      IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Padding="0" Margin="0" MinHeight="0" VerticalAlignment="Center"
                                                      Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
                                                      VerticalContentAlignment="Center" Cursor="IBeam"/>
                                         </DataTemplate>
@@ -594,6 +597,7 @@
                                         <DataTemplate>
                                             <TextBox Text="{Binding PhoneDisplay, Mode=OneWay}" 
                                                      IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Padding="0" Margin="0" MinHeight="0" VerticalAlignment="Center"
                                                      Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
                                                      VerticalContentAlignment="Center" Cursor="IBeam"/>
                                         </DataTemplate>

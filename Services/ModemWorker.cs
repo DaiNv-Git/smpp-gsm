@@ -118,14 +118,26 @@ public class ModemWorker : IDisposable
                 var elapsed = (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds;
                 int interval = _queue.Count > 0 ? SmsScanIntervalActiveMs : SmsScanIntervalIdleMs;
 
-                if (elapsed >= interval)
+                // 🔥 FIX: Check URC TRƯỚC — phát hiện SMS mới từ buffer SendAndRead
+                // Khi gửi SMS nội bộ (SIM A → SIM B cùng hệ thống), URC +CMTI đến
+                // trong lúc SendSms đang chạy → bị SendAndRead bắt vào _pendingUrcCount
+                // → Nếu không check URC ở đây, tin nhắn sẽ bị miss cho đến poll cycle tiếp theo
+                bool urcDetected = _helper.CheckForNewSms();
+                if (urcDetected)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 [{_sim.ComPort}] URC detected — đọc SMS ngay!");
+                    ReadIncomingSms();
+                    _lastSmsCountCheck = DateTime.Now;
+                    _lastSmsCount = 0; // Reset baseline sau khi đọc
+                }
+                else if (elapsed >= interval)
                 {
                     _lastSmsCountCheck = DateTime.Now;
                     var currentCount = _helper.GetSmsCount();
 
                     // Scan khi count TĂNG (có SMS mới đến)
                     // Hoặc count > 0 với baseline đã có (đảm bảo scan lần đầu)
-                    // Hoặc count == 0 nhưng baseline cũng là 0 (vẫn scan để đảm bảo)
                     if (currentCount > _lastSmsCount || (currentCount > 0 && _lastSmsCount >= 0))
                     {
                         System.Diagnostics.Debug.WriteLine(
@@ -141,18 +153,24 @@ public class ModemWorker : IDisposable
                 }
 
                 // 2. Process send queue — non-blocking
-                // Block tối đa 500ms (đủ để queue refill nếu có nhiều task)
-                // Trước: block 100ms → CPU spin khi queue rỗng → lãng phí
-                // Sau: block 500ms → worker idle đúng cách, polling vẫn chạy mỗi 3s interval
                 if (_queue.TryTake(out var task, 500, _cts.Token))
                 {
                     ProcessSmsTask(task);
 
-                    // 🔥 Check SMS ngay sau gửi xong
-                    // Khi queue active → interval=500ms → poll rất nhanh sau task
-                    _lastSmsCount = _helper.GetSmsCount();
-                    if (_lastSmsCount > 0)
+                    // 🔥 Check URC + SMS count ngay sau gửi xong
+                    // SMS nội bộ có thể đến ngay lập tức khi SIM khác vừa gửi xong
+                    if (_helper.CheckForNewSms())
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📬 [{_sim.ComPort}] URC after send — đọc SMS ngay!");
                         ReadIncomingSms();
+                    }
+                    else
+                    {
+                        _lastSmsCount = _helper.GetSmsCount();
+                        if (_lastSmsCount > 0)
+                            ReadIncomingSms();
+                    }
                 }
             }
             catch (OperationCanceledException)
