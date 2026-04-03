@@ -1,4 +1,4 @@
-using GsmAgent.Models;
+﻿using GsmAgent.Models;
 using System.Collections.Concurrent;
 
 namespace GsmAgent.Services;
@@ -393,7 +393,7 @@ public class ModemWorker : IDisposable
             int processedCount = 0;
 
             string? activeStorage = null;
-            var seenThisScan = new HashSet<string>(StringComparer.Ordinal);
+            var occurrenceMap = new Dictionary<string, int>();
 
             bool EnsureStorage(string storage)
             {
@@ -415,8 +415,19 @@ public class ModemWorker : IDisposable
 
             foreach (var (storage, index, sender, content, time) in allMessages)
             {
-                var cacheKeys = BuildDuplicateKeys(sender, content, time);
-                if (cacheKeys.Any(seenThisScan.Contains) || cacheKeys.Any(_processedSmsCache.ContainsKey))
+                var normalizedSender = NormalizeSender(sender);
+                var normalizedContent = NormalizeContent(content);
+                var exactTime = time.ToUniversalTime().ToString("yyyyMMddHHmmss");
+                
+                var baseKey = $"{normalizedSender}|{normalizedContent}|{exactTime}";
+                
+                if (!occurrenceMap.ContainsKey(baseKey))
+                    occurrenceMap[baseKey] = 0;
+                
+                int occurrence = occurrenceMap[baseKey]++;
+                var cacheKey = $"{baseKey}#{occurrence}";
+
+                if (_processedSmsCache.ContainsKey(cacheKey))
                 {
                     System.Diagnostics.Debug.WriteLine(
                         $"⏭️ [{_sim.ComPort}] Skip duplicate SMS (already processed): {sender} | {content.Substring(0, Math.Min(30, content.Length))}...");
@@ -435,11 +446,7 @@ public class ModemWorker : IDisposable
                     continue;
                 }
 
-                foreach (var key in cacheKeys)
-                {
-                    seenThisScan.Add(key);
-                    _processedSmsCache[key] = DateTime.Now;
-                }
+                _processedSmsCache[cacheKey] = DateTime.Now;
                 processedCount++;
 
                 // Delete SMS only after it has been persisted to local forward queue
@@ -462,37 +469,7 @@ public class ModemWorker : IDisposable
         }
     }
 
-    /// <summary>
-    /// Build duplicate keys cho SMS.
-    /// 🔥 FIX: Bỏ fuzzy bucket (yyyyMMddHHmm) vì nó gộp TẤT CẢ SMS cùng sender+content trong 1 phút
-    /// → gửi 5 tin cùng nội dung chỉ nhận 1! 
-    /// Mới: dùng exact timestamp (giây) + thêm storage index cho within-scan dedup.
-    /// </summary>
-    private static string[] BuildDuplicateKeys(string sender, string content, DateTime time, string? storageIndex = null)
-    {
-        var normalizedSender = NormalizeSender(sender);
-        var normalizedContent = NormalizeContent(content);
-        var exactTime = time.ToUniversalTime().ToString("yyyyMMddHHmmss");
-
-        var keys = new List<string>
-        {
-            // Key 1: Exact match (sender + content + giây chính xác)
-            $"{normalizedSender}|{normalizedContent}|{exactTime}"
-        };
-
-        // Key 2: Cross-storage dedup (ME vs SM cùng SMS, timestamp lệch 1-2 giây)
-        // Chỉ dùng nếu content ngắn (OTP, có khả năng trùng thật giữa ME/SM)
-        // Với content dài hoặc khác nhau → key exact đã đủ
-        if (normalizedContent.Length <= 20)
-        {
-            // Bucket 10 giây (thay vì 1 phút) — đủ bắt ME/SM lệch nhưng không quá rộng
-            var bucket10s = time.ToUniversalTime();
-            bucket10s = bucket10s.AddSeconds(-(bucket10s.Second % 10));
-            keys.Add($"{normalizedSender}|{normalizedContent}|{bucket10s:yyyyMMddHHmmss}");
-        }
-
-        return keys.ToArray();
-    }
+    // BuildDuplicateKeys method removed since deduplication logic is now inline
 
     private static string NormalizeSender(string sender)
     {

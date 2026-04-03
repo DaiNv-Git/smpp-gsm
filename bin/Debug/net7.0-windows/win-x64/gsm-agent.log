@@ -155,3 +155,49 @@
 [2026-04-03 15:47:41] [INFO] 📨 Incoming SMS from 08028391052: đã quá pepsi ơi meme
 [2026-04-03 15:47:50] [INFO] 📦 Loaded 592 SIM từ MongoDB
 [2026-04-03 15:47:51] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:48:53] [INFO] Server disconnected
+[2026-04-03 15:49:59] [INFO] 📋 SMS MANUAL-639108281967613540 → SENT
+[2026-04-03 15:49:59] [INFO] SMS Manual: COM163 → 07090852565: OK
+[2026-04-03 15:50:32] [INFO] 📋 SMS MANUAL-639108282296817945 → SENT
+[2026-04-03 15:50:32] [INFO] SMS Manual: COM172 → 07094405442: OK
+[2026-04-03 15:52:40] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:52:47] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:52:47] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:53:22] [INFO] GSM Agent khởi động
+[2026-04-03 15:53:23] [INFO] Auto-scan starting...
+[2026-04-03 15:53:23] [INFO] Manual scan started
+[2026-04-03 15:54:05] [INFO] Scan hoàn tất: 12 SIM(s)
+[2026-04-03 15:54:19] [INFO] Workers started: 12 SIMs
+[2026-04-03 15:54:20] [INFO] ✅ MongoDB connected → JapanSim.sims
+[2026-04-03 15:54:20] [INFO] 🔄 SimSyncService started — sync mỗi 300s
+[2026-04-03 15:54:20] [INFO] ✅ MongoDB sync initialized successfully
+[2026-04-03 15:54:20] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:54:28] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:54:29] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:55:33] [INFO] Server disconnected
+[2026-04-03 15:56:20] [INFO] 📋 SMS MANUAL-639108285777701116 → SENT
+[2026-04-03 15:56:20] [INFO] SMS Manual: COM163 → 08028505161: OK
+[2026-04-03 15:56:43] [INFO] 📋 SMS MANUAL-639108286012667318 → SENT
+[2026-04-03 15:56:43] [INFO] SMS Manual: COM163 → 08028505161: OK
+[2026-04-03 15:56:59] [INFO] 📋 SMS MANUAL-639108286167297794 → SENT
+[2026-04-03 15:56:59] [INFO] SMS Manual: COM164 → 08028505161: OK
+[2026-04-03 15:58:43] [INFO] GSM Agent khởi động
+[2026-04-03 15:58:44] [INFO] Auto-scan starting...
+[2026-04-03 15:58:44] [INFO] Manual scan started
+[2026-04-03 15:59:19] [INFO] SMS Manual: COM164 → 08028391052: OK
+[2026-04-03 15:59:27] [INFO] Scan hoàn tất: 12 SIM(s)
+[2026-04-03 15:59:43] [INFO] Workers started: 12 SIMs
+[2026-04-03 15:59:44] [INFO] ✅ MongoDB connected → JapanSim.sims
+[2026-04-03 15:59:44] [INFO] 🔄 SimSyncService started — sync mỗi 300s
+[2026-04-03 15:59:44] [INFO] ✅ MongoDB sync initialized successfully
+[2026-04-03 15:59:44] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:59:46] [INFO] 📨 Incoming SMS from 08028505161: he he
+[2026-04-03 15:59:53] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:59:53] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:59:58] [INFO] 📋 SMS MANUAL-639108287957983709 → SENT
+[2026-04-03 15:59:58] [INFO] SMS Manual: COM163 → 07092721311: OK
+[2026-04-03 16:00:03] [INFO] 📨 Incoming SMS from +819050548385: aaaaa
+[2026-04-03 16:00:16] [INFO] 📋 SMS MANUAL-639108288143615461 → SENT
+[2026-04-03 16:00:16] [INFO] SMS Manual: COM162 → 07092721311: OK
+[2026-04-03 16:00:27] [INFO] 📨 Incoming SMS from +818028391052: 本日もこれが最後のご通知となります。問題を解決されない場合、訴訟に至りますので、今後は日常生活や外出にも影響が出ることになります。
+[2026-04-03 16:00:57] [INFO] Server disconnected

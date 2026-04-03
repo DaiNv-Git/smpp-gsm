@@ -1254,7 +1254,7 @@ public class AtCommandHelper : IDisposable
                 for (int j = i + 1; j < lines.Length; j++)
                 {
                     var nextLine = lines[j].Trim();
-                    if (nextLine.StartsWith("+CMGL:") || nextLine == "OK" || nextLine == "ERROR" || nextLine.Length == 0)
+                    if (nextLine.StartsWith("+CMGL:") || nextLine == "OK" || nextLine == "ERROR")
                         break;
                     if (contentSb.Length > 0) contentSb.Append('\n');
                     contentSb.Append(nextLine);
