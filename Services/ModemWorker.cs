@@ -1,4 +1,4 @@
-﻿using GsmAgent.Models;
+using GsmAgent.Models;
 using System.Collections.Concurrent;
 
 namespace GsmAgent.Services;
@@ -17,7 +17,7 @@ public class ModemWorker : IDisposable
     private const int SmsScanIntervalIdleMs = 1500;
     private const int SmsScanIntervalActiveMs = 500;
     private readonly AtCommandHelper _helper;
-    private readonly BlockingCollection<SmsTask> _queue = new(100);
+    private readonly BlockingCollection<SmsTask> _queue = new(500); // 🔥 500 capacity for burst traffic
     private readonly CancellationTokenSource _cts = new();
     private readonly Thread _thread;
     private readonly SimCard _sim;
