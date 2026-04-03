@@ -678,6 +678,14 @@ public partial class MainViewModel : ObservableObject
                     return;
                 }
 
+                // 2b. Khởi tạo chế độ voice call (CLIP, CLCC URC, COLP)
+                UpdateCallUI(callRecord, CallState.Dialing, $"🔧 Init voice mode trên {sim.ComPort}...");
+                if (!helper.InitCallMode())
+                {
+                    UpdateCallUI(callRecord, CallState.Dialing, "⚠️ Init voice mode thất bại — vẫn thử gọi");
+                    // Không return — modem có thể không hỗ trợ COLP/CLIP nhưng vẫn gọi được
+                }
+
                 // 3. Gọi điện
                 UpdateCallUI(callRecord, CallState.Dialing, $"📞 Đang gọi {dest}...");
 
