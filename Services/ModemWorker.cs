@@ -64,7 +64,7 @@ public class ModemWorker : IDisposable
     // 🔥 Ported from Java PortWorker
     private int _scanCount = 0; // Track scan iterations for periodic cleanup
     private readonly ConcurrentDictionary<string, DateTime> _processedSmsCache = new(); // TTL-based cache
-    private static readonly TimeSpan SmsCacheTtl = TimeSpan.FromMinutes(60); // 🔥 Tăng từ 5 → 60 phút tránh lặp tin cũ
+    private readonly TimeSpan SmsCacheTtl = TimeSpan.FromMinutes(5);
 
     public bool Start()
     {
@@ -78,8 +78,17 @@ public class ModemWorker : IDisposable
         // Tuy nhiên VẪN CẦN BẬT URC để modem biết cách định tuyến SMS và kích hoạt CheckForNewSms nhanh
         _helper.EnableUrc();
 
+        // 🔥 XÓA MẠNH TAY TẤT CẢ TIN NHẮN CŨ LÚC KHỞI ĐỘNG (cả Read và Unread) để SIM không bao giờ bị ĐẦY!
+        System.Diagnostics.Debug.WriteLine($"🧹 [{_sim.ComPort}] Aggressively wiping all old SMS from SIM (AT+CMGD=1,4)...");
+        foreach (var storage in new[] { "ME", "SM" })
+        {
+            if (_helper.SetStorage(storage))
+                _helper.SendAndRead("AT+CMGD=1,4", 3000);
+        }
+
         // Đảm bảo SMSC đã được cấu hình — nếu thiếu, SMS sẽ gửi đi nhưng không đến
         _helper.EnsureSmscConfigured();
+        _lastSmsCount = _helper.GetSmsCount();
 
         IsRunning = true;
         _sim.Status = SimStatus.Online;
@@ -99,17 +108,15 @@ public class ModemWorker : IDisposable
         IsRunning = false;
         _cts.Cancel();
         _queue.CompleteAdding();
-        // 🔥 FIX: Join thread — đợi worker thread thật sự kết thúc trước khi return
-        // Caller (SerialPortManager.StopWorkerForPort) cần biết thread đã dừng thật
         _thread.Join(3000);
+        _cts.Dispose();
+        System.Diagnostics.Debug.WriteLine($"⏹️ ModemWorker stopped: {_sim.ComPort}");
     }
 
     private void RunLoop()
     {
         System.Diagnostics.Debug.WriteLine($"▶️ ModemWorker started: {_sim.ComPort}");
 
-        // 🔥 FIX: Adaptive polling — poll NHANH khi queue rỗng (idle), poll CHẬM khi đang active
-        // Bỏ URC vì: miss khi modem reset, gộp nhiều SMS thành 1 CMTI
         while (IsRunning && !_cts.Token.IsCancellationRequested)
         {
             try
@@ -118,37 +125,20 @@ public class ModemWorker : IDisposable
                 var elapsed = (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds;
                 int interval = _queue.Count > 0 ? SmsScanIntervalActiveMs : SmsScanIntervalIdleMs;
 
-                // 🔥 FIX: Check URC TRƯỚC — phát hiện SMS mới từ buffer SendAndRead
-                // Khi gửi SMS nội bộ (SIM A → SIM B cùng hệ thống), URC +CMTI đến
-                // trong lúc SendSms đang chạy → bị SendAndRead bắt vào _pendingUrcCount
-                // → Nếu không check URC ở đây, tin nhắn sẽ bị miss cho đến poll cycle tiếp theo
-                bool urcDetected = _helper.CheckForNewSms();
-                if (urcDetected)
-                {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"📬 [{_sim.ComPort}] URC detected — đọc SMS ngay!");
-                    ReadIncomingSms();
-                    _lastSmsCountCheck = DateTime.Now;
-                    _lastSmsCount = 0; // Reset baseline sau khi đọc
-                }
-                else if (elapsed >= interval)
+                // Nếu thời gian chờ đã đủ, chúng ta trực tiếp đọc ListUnreadSms mà không cần phụ thuộc vào URC
+                if (elapsed >= interval)
                 {
                     _lastSmsCountCheck = DateTime.Now;
+                    
                     var currentCount = _helper.GetSmsCount();
 
-                    // Scan khi count TĂNG (có SMS mới đến)
-                    // Hoặc count > 0 với baseline đã có (đảm bảo scan lần đầu)
-                    if (currentCount > _lastSmsCount || (currentCount > 0 && _lastSmsCount >= 0))
+                    // 🔥 BẮT BUỘC ĐỌC: Nếu có tin nhắn (count > 0) -> đọc luôn!
+                    if (currentCount > 0)
                     {
                         System.Diagnostics.Debug.WriteLine(
-                            $"📬 [{_sim.ComPort}] SMS count: {_lastSmsCount} → {currentCount}");
+                            $"📬 [{_sim.ComPort}] SMS count > 0 ({currentCount}). Force reading SMS!");
                         ReadIncomingSms();
-                        _lastSmsCount = currentCount;
-                    }
-                    else if (currentCount == 0)
-                    {
-                        // Count về 0 → đã xử lý hết trong scan trước, reset baseline
-                        _lastSmsCount = 0;
+                        _lastSmsCount = _helper.GetSmsCount(); // Cập nhật lại số lượng sau khi xóa
                     }
                 }
 

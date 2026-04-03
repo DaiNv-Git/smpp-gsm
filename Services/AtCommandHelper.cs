@@ -1186,83 +1186,47 @@ public class AtCommandHelper : IDisposable
     }
 
     /// <summary>Set text mode — gọi trước khi ListUnreadSms.
-    /// Dùng UCS2 charset để modem trả content tiếng Nhật/Trung/Việt dạng hex.</summary>
+    /// 🔥 FIX: Dùng GSM charset để AT+CMGL="REC UNREAD" LUÔN hoạt động.
+    /// UCS2 charset gây lỗi: modem không hiểu filter ASCII → trả OK rỗng → fallback ALL → lặp tin.</summary>
     public void PrepareForRead()
     {
         try
         {
             SendAndRead("AT+CMGF=1", 500);
-            // 🔥 Set UCS2 TRƯỚC để modem trả content dạng hex (decode được)
-            // Nhưng AT+CMGL status filter vẫn dùng ASCII (đa số modem chấp nhận)
-            SendAndRead("AT+CSCS=\"UCS2\"", 500);
+            // 🔥 DÙNG GSM — KHÔNG dùng UCS2 ở đây!
+            // Lý do: Khi CSCS=UCS2, nhiều modem yêu cầu filter string cũng phải UCS2
+            // → AT+CMGL="REC UNREAD" trả OK rỗng → fallback ALL → đọc tin cũ → lặp tin
+            // Content sẽ được decode bằng DecodeUcs2IfNeeded() sau khi parse
+            SendAndRead("AT+CSCS=\"GSM\"", 500);
         }
         catch { }
     }
 
-    /// <summary>Đọc SMS UNREAD only — thử nhiều format để tương thích đa số modem.
-    /// 🔥 FIX: Fallback khi kết quả rỗng (không chỉ ERROR) — modem có thể trả OK rỗng
-    /// khi CSCS=UCS2 nhưng filter string là ASCII. Dedup cache trong ModemWorker ngăn lặp tin.</summary>
+    /// <summary>Đọc SMS UNREAD only.
+    /// 🔥 FIX: KHÔNG BAO GIỜ dùng "ALL" — đó là nguyên nhân gây lặp tin.
+    /// Chỉ dùng "REC UNREAD" (+ fallback integer 0). Nếu không có tin mới → trả rỗng.</summary>
     public List<(int index, string sender, string content, DateTime time)> ListUnreadSms(int timeoutMs = 5000)
     {
         var messages = new List<(int, string, string, DateTime)>();
         try
         {
-            // Step 1: ASCII "REC UNREAD" — đa số modem chấp nhận dù CSCS=UCS2
+            // Step 1: "REC UNREAD" — hoạt động tốt khi CSCS=GSM
             var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
             bool gotError = resp.Contains("ERROR");
             bool hasData = resp.Contains("+CMGL");
             System.Diagnostics.Debug.WriteLine(
                 $"📬 ListUnreadSms [REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
 
-            // Step 2: UCS2-encoded "REC UNREAD" — cho modem yêu cầu strict UCS2
-            // 🔥 FIX: Thử cả khi kết quả rỗng (không chỉ ERROR) — modem có thể trả OK rỗng
-            if (!hasData)
-            {
-                string unreadHex = EncodeUcs2("REC UNREAD");
-                resp = SendAndRead($"AT+CMGL=\"{unreadHex}\"", timeoutMs);
-                gotError = resp.Contains("ERROR");
-                hasData = resp.Contains("+CMGL");
-                System.Diagnostics.Debug.WriteLine(
-                    $"📬 ListUnreadSms [UCS2 REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
-            }
-
-            // Step 3: Integer 0 = "REC UNREAD" (một số modem cũ)
-            if (!hasData)
+            // Step 2: Integer 0 = "REC UNREAD" (fallback cho modem cũ)
+            if (gotError && !hasData)
             {
                 resp = SendAndRead("AT+CMGL=0", timeoutMs);
-                gotError = resp.Contains("ERROR");
                 hasData = resp.Contains("+CMGL");
                 System.Diagnostics.Debug.WriteLine(
-                    $"📬 ListUnreadSms [0]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
+                    $"📬 ListUnreadSms [0]: {(hasData ? "HAS DATA" : "EMPTY")}");
             }
 
-            // Step 4: "ALL" — last resort, dedup cache ngăn lặp tin cũ
-            if (!hasData)
-            {
-                resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
-                hasData = resp.Contains("+CMGL");
-                System.Diagnostics.Debug.WriteLine(
-                    $"📬 ListUnreadSms [ALL fallback]: {(hasData ? "HAS DATA" : "EMPTY")}");
-
-                // Nếu ALL vẫn rỗng, thử UCS2-encoded "ALL"
-                if (!hasData)
-                {
-                    string allHex = EncodeUcs2("ALL");
-                    resp = SendAndRead($"AT+CMGL=\"{allHex}\"", timeoutMs);
-                    hasData = resp.Contains("+CMGL");
-                    System.Diagnostics.Debug.WriteLine(
-                        $"📬 ListUnreadSms [UCS2 ALL]: {(hasData ? "HAS DATA" : "EMPTY")}");
-                }
-
-                // Cuối cùng: integer 4 = "ALL" 
-                if (!hasData)
-                {
-                    resp = SendAndRead("AT+CMGL=4", timeoutMs);
-                    hasData = resp.Contains("+CMGL");
-                    System.Diagnostics.Debug.WriteLine(
-                        $"📬 ListUnreadSms [4]: {(hasData ? "HAS DATA" : "EMPTY")}");
-                }
-            }
+            // 🔥 KHÔNG CÓ FALLBACK "ALL" — "ALL" đọc cả tin đã đọc → GÂY LẶP TIN!
 
             ParseCmglResponse(resp, messages);
             System.Diagnostics.Debug.WriteLine(
@@ -1298,7 +1262,7 @@ public class AtCommandHelper : IDisposable
             {
                 string sender = quotedFields.ElementAtOrDefault(1) ?? (quotedFields.Count > 0 ? quotedFields[0] : "");
                 string timestamp = quotedFields.LastOrDefault(f =>
-                    Regex.IsMatch(f, @"^\d{2,4}/\d{2}/\d{2},\d{2}:\d{2}:\d{2}(?:[+-]\d{2})?$")) ?? "";
+                    Regex.IsMatch(f, @"^\d{2,4}[/-]\d{2}[/-]\d{2}\s*,\s*\d{2}:\d{2}:\d{2}(?:\s*[+-]\d{2})?$")) ?? "";
                 
                 // 🔥 FIX: Đọc multi-line content (cho đến +CMGL: tiếp theo hoặc OK)
                 var contentSb = new StringBuilder();
@@ -1360,11 +1324,11 @@ public class AtCommandHelper : IDisposable
             var value = ts.Replace("\"", "").Trim();
             var match = Regex.Match(
                 value,
-                @"^(?<date>\d{2,4}/\d{2}/\d{2}),(?<time>\d{2}:\d{2}:\d{2})(?<offset>[+-]\d{2})?$");
+                @"^(?<date>\d{2,4}[/-]\d{2}[/-]\d{2})\s*,\s*(?<time>\d{2}:\d{2}:\d{2})\s*(?<offset>[+-]\d{2})?$");
 
             if (match.Success)
             {
-                var dateTimePart = $"{match.Groups["date"].Value},{match.Groups["time"].Value}";
+                var dateTimePart = $"{match.Groups["date"].Value.Replace("-", "/")},{match.Groups["time"].Value}";
                 var formats = new[] { "yy/MM/dd,HH:mm:ss", "yyyy/MM/dd,HH:mm:ss" };
                 if (DateTime.TryParseExact(
                     dateTimePart,
@@ -1381,7 +1345,8 @@ public class AtCommandHelper : IDisposable
                 return fallback;
         }
         catch { }
-        return DateTime.Now;
+        // 🔥 FIX: Return DateTime.MinValue instead of DateTime.Now so deduplication cache works using a stable constant!
+        return DateTime.MinValue;
     }
 
     // ==================== Utilities ====================
