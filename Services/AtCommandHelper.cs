@@ -15,6 +15,11 @@ public class AtCommandHelper : IDisposable
     private readonly object _lock = new();
     private bool _disposed;
 
+    // 🔥 Cache flags — chỉ gửi AT config MỘT LẦN thay vì mỗi SMS
+    private bool _smscConfigured;
+    private string? _cachedSmsc;
+    private string? _lastCharset; // "GSM" hoặc "UCS2"
+
     public bool IsOpen => _port.IsOpen;
     public string PortName => _port.PortName;
 
@@ -42,6 +47,10 @@ public class AtCommandHelper : IDisposable
             // Init modem
             SendAndRead("ATZ", 500);
             SendAndRead("ATE0", 300);
+            // 🔥 Reset cache khi mở port mới — modem có thể đã reset
+            _smscConfigured = false;
+            _cachedSmsc = null;
+            _lastCharset = null;
             return true;
         }
         catch (Exception ex)
@@ -620,7 +629,7 @@ public class AtCommandHelper : IDisposable
     /// - GSM 7-bit cho ASCII (tiết kiệm SMS count), tự retry UCS-2 nếu modem từ chối
     /// - Timeout 2000ms cho AT+CSCS (modem chậm switch charset)
     /// </summary>
-    public bool SendSms(string destNumber, string content, int timeoutMs = 30000)
+    public bool SendSms(string destNumber, string content, int timeoutMs = 10000)
     {
         lock (_lock)
         {
@@ -632,18 +641,22 @@ public class AtCommandHelper : IDisposable
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
 
-                SendAndRead("AT+CMGF=1", 1000);
+                SendAndRead("AT+CMGF=1", 500);
 
-                // Check SMSC — nếu chưa set, SMS không đến được
-                var smsc = GetSmsc();
-                if (string.IsNullOrWhiteSpace(smsc))
+                // 🔥 Cache SMSC — chỉ check MỘT LẦN, không gọi mỗi SMS
+                if (!_smscConfigured)
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"⚠️ SendSms: SMSC chưa set! Đang auto-detect...");
-                    EnsureSmscConfigured();
-                    smsc = GetSmsc();
+                    _cachedSmsc = GetSmsc();
+                    if (string.IsNullOrWhiteSpace(_cachedSmsc))
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"⚠️ SendSms: SMSC chưa set! Đang auto-detect...");
+                        EnsureSmscConfigured();
+                        _cachedSmsc = GetSmsc();
+                    }
+                    _smscConfigured = true;
+                    System.Diagnostics.Debug.WriteLine($"📡 SMSC: {_cachedSmsc ?? "KHÔNG CÓ"}");
                 }
-                System.Diagnostics.Debug.WriteLine($"📡 SMSC: {smsc ?? "KHÔNG CÓ — SMS có thể không gửi được!"}");
 
                 System.Diagnostics.Debug.WriteLine(
                     $"📤 SendSms: dest={normalizedDest}, unicode={isUnicode}, contentLen={content.Length}");
@@ -651,9 +664,13 @@ public class AtCommandHelper : IDisposable
                 if (isUnicode)
                 {
                     // ── UCS-2 path (tiếng Việt có dấu, Trung, Nhật) ──
-                    // Tăng timeout lên 2000ms — modem cần thời gian switch charset
-                    SendAndRead("AT+CSCS=\"UCS2\"", 2000);
-                    SendAndRead("AT+CSMP=49,167,0,8", 1000);
+                    // Chỉ switch charset NẾU khác charset hiện tại
+                    if (_lastCharset != "UCS2")
+                    {
+                        SendAndRead("AT+CSCS=\"UCS2\"", 1000);
+                        SendAndRead("AT+CSMP=49,167,0,8", 500);
+                        _lastCharset = "UCS2";
+                    }
 
                     // Encode nội dung sang UCS-2 hex string (big-endian, network byte order)
                     byte[] ucs2Bytes = Encoding.BigEndianUnicode.GetBytes(content);
@@ -664,9 +681,13 @@ public class AtCommandHelper : IDisposable
                 else
                 {
                     // ── GSM 7-bit path (ASCII — tiếng Anh, số) ──
-                    // Thử GSM default alphabet trước
-                    SendAndRead("AT+CSCS=\"GSM\"", 2000);
-                    SendAndRead("AT+CSMP=49,167,0,0", 1000);
+                    // Chỉ switch charset NẾU khác charset hiện tại
+                    if (_lastCharset != "GSM")
+                    {
+                        SendAndRead("AT+CSCS=\"GSM\"", 1000);
+                        SendAndRead("AT+CSMP=49,167,0,0", 500);
+                        _lastCharset = "GSM";
+                    }
 
                     bool ok = SendSmsWithAsciiContent(normalizedDest, content, timeoutMs);
                     if (ok) return true;
@@ -674,8 +695,9 @@ public class AtCommandHelper : IDisposable
                     // GSM bị modem từ chối → fallback sang UCS-2
                     System.Diagnostics.Debug.WriteLine(
                         $"📤 [{_port.PortName}] GSM 7-bit bị từ chối → thử UCS-2 fallback");
-                    SendAndRead("AT+CSCS=\"UCS2\"", 2000);
-                    SendAndRead("AT+CSMP=49,167,0,8", 1000);
+                    SendAndRead("AT+CSCS=\"UCS2\"", 1000);
+                    SendAndRead("AT+CSMP=49,167,0,8", 500);
+                    _lastCharset = "UCS2";
 
                     byte[] ucs2Bytes = Encoding.BigEndianUnicode.GetBytes(content);
                     string ucs2Hex = BitConverter.ToString(ucs2Bytes).Replace("-", "");
@@ -690,7 +712,8 @@ public class AtCommandHelper : IDisposable
             finally
             {
                 // Restore UCS2 for reading incoming SMS (tiếng Nhật / multi-language)
-                try { SendAndRead("AT+CSCS=\"UCS2\"", 500); } catch { }
+                // 🔥 Giảm timeout 500→200ms vì modem đã ở trạng thái sẵn sàng
+                try { SendAndRead("AT+CSCS=\"UCS2\"", 200); } catch { }
             }
         }
     }

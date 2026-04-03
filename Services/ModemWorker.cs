@@ -35,7 +35,7 @@ public class ModemWorker : IDisposable
 
     public ModemWorker(
         SimCard sim,
-        int cooldownMs = 2000,
+        int cooldownMs = 1500,
         int maxRetries = 3,
         Action<string, string, bool, string?>? onSmsResult = null,
         Action<SimCard>? onSimUpdated = null,
