@@ -76,6 +76,7 @@ public partial class MainViewModel : ObservableObject
         // Setup filtered view for messages
         FilteredMessages = CollectionViewSource.GetDefaultView(MessageList);
         FilteredMessages.Filter = FilterMessagesPredicate;
+        FilteredMessages.SortDescriptions.Add(new SortDescription("CreatedAt", ListSortDirection.Descending));
 
         Logger.Info("GSM Agent khởi động");
 

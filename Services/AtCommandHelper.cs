@@ -712,30 +712,64 @@ public class AtCommandHelper : IDisposable
                 if (isUnicode)
                 {
                     // ── UCS-2 path (tiếng Việt có dấu, Trung, Nhật) ──
-                    // Chỉ switch charset NẾU khác charset hiện tại
-                    if (_lastCharset != "UCS2")
+                    // 🔥 FIX: LUÔN gửi AT+CSCS + AT+CSMP — KHÔNG dùng cache.
+                    // Lý do: modem có thể reset charset sau mỗi SMS hoặc sau timeout.
+                    // Cache _lastCharset == "UCS2" nhưng modem đã reset → SMS fail silently.
+                    var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+                    if (!cscsResp.Contains("OK"))
                     {
-                        SendAndRead("AT+CSCS=\"UCS2\"", 1000);
-                        SendAndRead("AT+CSMP=49,167,0,8", 500);
-                        _lastCharset = "UCS2";
+                        System.Diagnostics.Debug.WriteLine(
+                            $"⚠️ [{_port.PortName}] AT+CSCS=UCS2 failed: {cscsResp.Trim()} — retry");
+                        Thread.Sleep(200);
+                        cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+                        // 🔥 FIX: Retry vẫn fail → không nên tiếp tục gửi SMS
+                        if (!cscsResp.Contains("OK"))
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"❌ [{_port.PortName}] AT+CSCS=UCS2 retry FAILED — aborting SMS");
+                            return false;
+                        }
                     }
+                    SendAndRead("AT+CSMP=49,167,0,8", 1000);
+                    _lastCharset = "UCS2";
 
                     // Encode nội dung sang UCS-2 hex string (big-endian, network byte order)
                     byte[] ucs2Bytes = Encoding.BigEndianUnicode.GetBytes(content);
                     string ucs2Hex = BitConverter.ToString(ucs2Bytes).Replace("-", "");
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📝 [{_port.PortName}] UCS2 hex ({ucs2Hex.Length / 2} bytes): {ucs2Hex.Substring(0, Math.Min(40, ucs2Hex.Length))}...");
+
+                    // 🔥 FIX: Concatenated SMS — nếu nội dung dài (>70 ký tự Unicode = 140 bytes = 280 hex chars)
+                    // Cần tách thành nhiều SMS với UDH (User Data Header) 7-byte
+                    // UDH format: 05 00 03 XX YY ZZ  — XXYYZZ = reference ID (2 bytes) + total parts (1 byte) + part num (1 byte)
+                    if (ucs2Hex.Length > 280)
+                    {
+                        return SendSmsConcatenated(normalizedDest, ucs2Hex, timeoutMs);
+                    }
 
                     return SendSmsWithHexContent(normalizedDest, ucs2Hex, timeoutMs);
                 }
                 else
                 {
                     // ── GSM 7-bit path (ASCII — tiếng Anh, số) ──
-                    // Chỉ switch charset NẾU khác charset hiện tại
-                    if (_lastCharset != "GSM")
+                    // 🔥 FIX: LUÔN gửi AT+CSCS + AT+CSMP — KHÔNG dùng cache.
+                    var cscsResp = SendAndRead("AT+CSCS=\"GSM\"", 2000);
+                    if (!cscsResp.Contains("OK"))
                     {
-                        SendAndRead("AT+CSCS=\"GSM\"", 1000);
-                        SendAndRead("AT+CSMP=49,167,0,0", 500);
-                        _lastCharset = "GSM";
+                        System.Diagnostics.Debug.WriteLine(
+                            $"⚠️ [{_port.PortName}] AT+CSCS=GSM failed: {cscsResp.Trim()} — retry");
+                        Thread.Sleep(200);
+                        cscsResp = SendAndRead("AT+CSCS=\"GSM\"", 2000);
+                        // 🔥 FIX: Retry vẫn fail → không nên tiếp tục gửi SMS
+                        if (!cscsResp.Contains("OK"))
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"❌ [{_port.PortName}] AT+CSCS=GSM retry FAILED — aborting SMS");
+                            return false;
+                        }
                     }
+                    SendAndRead("AT+CSMP=49,167,0,0", 1000);
+                    _lastCharset = "GSM";
 
                     bool ok = SendSmsWithAsciiContent(normalizedDest, content, timeoutMs);
                     if (ok) return true;
@@ -743,8 +777,19 @@ public class AtCommandHelper : IDisposable
                     // GSM bị modem từ chối → fallback sang UCS-2
                     System.Diagnostics.Debug.WriteLine(
                         $"📤 [{_port.PortName}] GSM 7-bit bị từ chối → thử UCS-2 fallback");
-                    SendAndRead("AT+CSCS=\"UCS2\"", 1000);
-                    SendAndRead("AT+CSMP=49,167,0,8", 500);
+                    cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+                    if (!cscsResp.Contains("OK"))
+                    {
+                        Thread.Sleep(200);
+                        cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+                        if (!cscsResp.Contains("OK"))
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"❌ [{_port.PortName}] GSM fallback UCS-2 FAILED");
+                            return false;
+                        }
+                    }
+                    SendAndRead("AT+CSMP=49,167,0,8", 1000);
                     _lastCharset = "UCS2";
 
                     byte[] ucs2Bytes = Encoding.BigEndianUnicode.GetBytes(content);
@@ -760,8 +805,12 @@ public class AtCommandHelper : IDisposable
             finally
             {
                 // Restore UCS2 for reading incoming SMS (tiếng Nhật / multi-language)
-                // 🔥 Giảm timeout 500→200ms vì modem đã ở trạng thái sẵn sàng
-                try { SendAndRead("AT+CSCS=\"UCS2\"", 200); } catch { }
+                // 🔥 FIX: Tăng timeout 200→500ms và reset cache về null để lần gửi sau
+                // luôn gửi lại AT+CSCS + AT+CSMP đầy đủ (tránh cache sai).
+                try { SendAndRead("AT+CSCS=\"UCS2\"", 500); } catch { }
+                _lastCharset = null; // 🔥 Reset cache — modem sẽ nhận AT+CSCS đúng ở lần sau
+                // 🔥 FIX: Reset SMSC cache để re-check nếu nhà mạng đổi SMSC
+                _smscConfigured = false;
             }
         }
     }
@@ -772,7 +821,7 @@ public class AtCommandHelper : IDisposable
     /// </summary>
     private bool SendSmsWithAsciiContent(string destNumber, string content, int timeoutMs)
     {
-        // Check URC trước khi discard
+        // 🔥 FIX: Check URC pending TRƯỚC khi discard buffer
         if (_port.BytesToRead > 0)
         {
             var pending = _port.ReadExisting();
@@ -792,6 +841,82 @@ public class AtCommandHelper : IDisposable
         _port.BaseStream.Write(contentBytes, 0, contentBytes.Length);
 
         return WaitForCmgsResult(timeoutMs);
+    }
+
+    /// <summary>
+    /// 🔥 FIX: Gửi SMS dài (concatenated) bằng UDH (User Data Header).
+    /// GSM 03.38 spec: UDH 7-byte cho concatenated SMS 8-bit reference.
+    /// Format: 05 00 03 XX YY ZZ
+    ///   05 = UDH length (5 bytes)
+    ///   00 = IEI: concatenated SMS (8-bit reference)
+    ///   03 = IEI data length
+    ///   XX YY = reference ID (random, big-endian)
+    ///   ZZ   = total parts
+    /// Phần content sau UDH giảm 7 bytes (40 chars Unicode = 80 hex chars).
+    /// </summary>
+    private bool SendSmsConcatenated(string destNumber, string ucs2Hex, int timeoutMs)
+    {
+        // UCS-2 max per SMS part: (140 - 7) / 2 = 66.5 → 66 Unicode chars (132 hex chars)
+        const int maxCharsPerPart = 66;
+        const int hexCharsPerPart = maxCharsPerPart * 4; // 264 hex chars per part
+
+        int totalParts = (int)Math.Ceiling((double)ucs2Hex.Length / hexCharsPerPart);
+        if (totalParts > 255)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ SendSmsConcatenated: too many parts ({totalParts})");
+            return false;
+        }
+
+        // Generate random reference ID (2 bytes, big-endian)
+        var rand = new Random();
+        int refId = rand.Next(1, 255);
+        string refHex = refId.ToString("X2"); // 1 byte → 2 hex chars (pad left)
+
+        System.Diagnostics.Debug.WriteLine(
+            $"📝 [{_port.PortName}] Sending concatenated SMS: {totalParts} parts, refId={refId}");
+
+        for (int part = 1; part <= totalParts; part++)
+        {
+            int start = (part - 1) * hexCharsPerPart;
+            int len = Math.Min(hexCharsPerPart, ucs2Hex.Length - start);
+            string partHex = ucs2Hex.Substring(start, len);
+
+            // Build UDH: 050003 + refId(2 hex) + totalParts(2 hex) + partNum(2 hex)
+            // = 0500 03 XX YY ZZ  →  "050003" + refHex + totalHex + partHex
+            string totalHex = totalParts.ToString("X2");
+            string partNumHex = part.ToString("X2");
+            string udhHex = $"050003{refHex}{totalHex}{partNumHex}";
+
+            // Full content = UDH (14 hex chars = 7 bytes) + partHex
+            string fullHex = udhHex + partHex;
+
+            System.Diagnostics.Debug.WriteLine(
+                $"📝 [{_port.PortName}] Part {part}/{totalParts}: UDH={udhHex} contentLen={len}");
+
+            // Send this part
+            bool ok = SendSmsWithHexContentSinglePart(destNumber, fullHex, timeoutMs);
+            if (!ok)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"❌ [{_port.PortName}] Concatenated SMS part {part}/{totalParts} FAILED");
+                return false;
+            }
+
+            // Delay giữa các parts để tránh modem overload (300ms)
+            if (part < totalParts)
+                Thread.Sleep(300);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Gửi 1 phần của concatenated SMS (đã có UDH prefix trong contentHex).
+    /// Tái sử dụng SendSmsWithHexContent vì nội dung đã bao gồm UDH.
+    /// </summary>
+    private bool SendSmsWithHexContentSinglePart(string destNumber, string contentWithUdh, int timeoutMs)
+    {
+        return SendSmsWithHexContent(destNumber, contentWithUdh, timeoutMs);
     }
 
     /// <summary>
@@ -830,23 +955,35 @@ public class AtCommandHelper : IDisposable
     {
         var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
         var sb = new StringBuilder();
+        var buf = new byte[256];
         while (DateTime.Now < deadline)
         {
             if (_port.BytesToRead > 0)
             {
-                var chunk = _port.ReadExisting();
-                sb.Append(chunk);
-                if (sb.ToString().Contains(">")) return true;
-                if (sb.ToString().Contains("ERROR"))
+                // 🔥 FIX: Dùng BaseStream.Read thay vì ReadExisting
+                // ReadExisting dùng SerialPort.Encoding → có risk multi-byte char bị cắt
+                // Hex digits (0-9 A-F) là ASCII 1 byte → an toàn, nhưng prompt '>'
+                // có thể đến cùng buffer với data → dùng raw byte read cho chắc
+                int len = _port.BaseStream.Read(buf, 0, buf.Length);
+                if (len > 0)
+                    sb.Append(Encoding.ASCII.GetString(buf, 0, len));
+
+                var resp = sb.ToString();
+                if (resp.Contains(">")) return true;
+                if (resp.Contains("ERROR"))
                 {
                     System.Diagnostics.Debug.WriteLine($"❌ SendSms: modem ERROR khi đợi prompt: {sb}");
+                    // 🔥 FIX: Gửi ESCAPE TRƯỚC KHI return
+                    try { _port.BaseStream.WriteByte(0x1B); } catch { }
                     return false;
                 }
             }
             Thread.Sleep(50);
         }
         System.Diagnostics.Debug.WriteLine($"❌ SendSms: No '>' prompt after {timeoutMs}ms (got: {sb})");
-        try { _port.BaseStream.WriteByte(0x1B); } catch { } // Escape
+        // 🔥 FIX: ESCAPE phải gửi TRƯỚC KHI return — không phải sau
+        try { _port.BaseStream.WriteByte(0x1B); } catch { }
+        Thread.Sleep(100);
         return false;
     }
 
