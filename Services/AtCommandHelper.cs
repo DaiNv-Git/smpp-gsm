@@ -1187,6 +1187,36 @@ public class AtCommandHelper : IDisposable
 
     // ==================== VOICE CALL ====================
 
+    /// <summary>
+    /// Khởi tạo chế độ voice call: bật CLIP, CLCC URC, ATE0.
+    /// Gọi SAU Open() và TRƯỚC MakeVoiceCall().
+    /// </summary>
+    public bool InitCallMode()
+    {
+        lock (_lock)
+        {
+            try
+            {
+                // ATE0: tắt echo để response sạch hơn
+                SendAndRead("ATE0", 500);
+                // Bật Caller ID presentation
+                SendAndRead("AT+CLIP=1", 1000);
+                // Bật Unsolicited Call List — modem tự báo khi có cuộc gọi
+                var r1 = SendAndRead("AT+CLCC=1", 1000);
+                // Nhiều modem cần COLP cho cuộc gọi quốc tế
+                var r2 = SendAndRead("AT+COLP=1", 1000);
+                System.Diagnostics.Debug.WriteLine(
+                    $"📞 InitCallMode: CLCC={r1.Contains("OK")} COLP={r2.Contains("OK")}");
+                return r1.Contains("OK") || r2.Contains("OK");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"⚠️ InitCallMode failed: {ex.Message}");
+                return false;
+            }
+        }
+    }
+
     /// <summary>Gọi điện thoại (voice call). Semicolon quan trọng để modem hiểu là voice call.</summary>
     public bool MakeVoiceCall(string destNumber)
     {
@@ -1269,7 +1299,7 @@ public class AtCommandHelper : IDisposable
                 var pending = _port.ReadExisting();
                 if (pending.Contains("+CLCC:"))
                 {
-                    var match = Regex.Match(pending, @"\+CLCC:\s*\d+,\d+,(\d+)");
+                    var match = Regex.Match(pending, @"\+CLCC:\s*[\d]+,[\d]+,(\d+)");
                     if (match.Success)
                         return int.Parse(match.Groups[1].Value);
                 }
@@ -1278,9 +1308,18 @@ public class AtCommandHelper : IDisposable
             var resp = SendAndRead("AT+CLCC", 2000);
 
             // +CLCC: <idx>,<dir>,<stat>,<mode>,<mpty>[,<number>,<type>]
-            var m = Regex.Match(resp, @"\+CLCC:\s*\d+,\d+,(\d+)");
+            // stat: 0=active, 1=held, 2=dialing, 3=ringing, 4=alerting, 5=waiting, 6=released
+            // Dùng [\d]+ thay vì \d+ để bắt extra fields trong docomo modem
+            var m = Regex.Match(resp, @"\+CLCC:\s*[\d]+,[\d]+,(\d+)");
             if (m.Success)
-                return int.Parse(m.Groups[1].Value);
+            {
+                var stat = int.Parse(m.Groups[1].Value);
+                System.Diagnostics.Debug.WriteLine($"📞 GetCallStatus={stat} raw='{resp}'");
+                return stat;
+            }
+
+            // DEBUG: log response để biết modem trả gì (hữu ích cho docomo)
+            System.Diagnostics.Debug.WriteLine($"⚠️ GetCallStatus: no CLCC match, raw='{resp}'");
 
             // Không có +CLCC = không có cuộc gọi nào
             return -1;
