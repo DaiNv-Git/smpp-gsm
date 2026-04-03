@@ -66,3 +66,92 @@
 [2026-04-02 23:22:24] [INFO] 🛑 Set 21 SIMs INACTIVE cho device 'DESKTOP-G7U2DSC'
 [2026-04-02 23:22:24] [INFO] 🛑 Shutdown: set INACTIVE tất cả SIM của 'DESKTOP-G7U2DSC'
 [2026-04-02 23:22:24] [INFO] ⏹ SimSyncService stopped
+[2026-04-03 15:31:52] [INFO] GSM Agent khởi động
+[2026-04-03 15:31:53] [INFO] Auto-scan starting...
+[2026-04-03 15:31:53] [INFO] Manual scan started
+[2026-04-03 15:32:38] [INFO] Scan hoàn tất: 12 SIM(s)
+[2026-04-03 15:32:53] [INFO] Workers started: 12 SIMs
+[2026-04-03 15:32:54] [INFO] ✅ MongoDB connected → JapanSim.sims
+[2026-04-03 15:32:54] [INFO] 🔄 SimSyncService started — sync mỗi 300s
+[2026-04-03 15:32:54] [INFO] ✅ MongoDB sync initialized successfully
+[2026-04-03 15:32:54] [INFO] SMS Manual: COM163 → 08028505161: OK
+[2026-04-03 15:32:54] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:33:02] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010137233865F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010143430372F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010143430380F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010137233857F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010143430356F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010143430364F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010143430323F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010137233840F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 🔄 SIM 8981090010137233824F → REPLACED (missCount≥5)
+[2026-04-03 15:33:02] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:33:21] [INFO] 📋 SMS MANUAL-639108271977198672 → SENT
+[2026-04-03 15:33:21] [INFO] SMS Manual: COM163 → 08028505161: OK
+[2026-04-03 15:33:27] [INFO] 📨 Incoming SMS from 09050548385: 123213 132
+[2026-04-03 15:33:41] [INFO] 📋 SMS MANUAL-639108272171149698 → FAILED
+[2026-04-03 15:33:41] [INFO] SMS Manual: COM163 → 08028505161: FAIL
+[2026-04-03 15:33:51] [INFO] 📋 SMS MANUAL-639108272300161233 → FAILED
+[2026-04-03 15:33:51] [INFO] SMS Manual: COM169 → 08028505161: FAIL
+[2026-04-03 15:33:57] [INFO] 📋 SMS MANUAL-639108272342097117 → FAILED
+[2026-04-03 15:33:57] [INFO] SMS Manual: COM171 → 08028505161: FAIL
+[2026-04-03 15:34:07] [INFO] Server disconnected
+[2026-04-03 15:36:26] [INFO] GSM Agent khởi động
+[2026-04-03 15:36:27] [INFO] Auto-scan starting...
+[2026-04-03 15:36:27] [INFO] Manual scan started
+[2026-04-03 15:37:10] [INFO] Scan hoàn tất: 12 SIM(s)
+[2026-04-03 15:37:24] [INFO] Workers started: 12 SIMs
+[2026-04-03 15:37:25] [INFO] ✅ MongoDB connected → JapanSim.sims
+[2026-04-03 15:37:25] [INFO] 🔄 SimSyncService started — sync mỗi 300s
+[2026-04-03 15:37:25] [INFO] ✅ MongoDB sync initialized successfully
+[2026-04-03 15:37:25] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:37:33] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:37:33] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:37:50] [INFO] 📋 SMS MANUAL-639108274674057318 → FAILED
+[2026-04-03 15:37:50] [INFO] SMS Manual: COM162 → 08028391052: FAIL
+[2026-04-03 15:38:04] [INFO] 📋 SMS MANUAL-639108274829385777 → FAILED
+[2026-04-03 15:38:04] [INFO] SMS Manual: COM165 → 08028391052: FAIL
+[2026-04-03 15:38:29] [INFO] GSM Agent khởi động
+[2026-04-03 15:38:30] [INFO] Auto-scan starting...
+[2026-04-03 15:38:30] [INFO] Manual scan started
+[2026-04-03 15:39:12] [INFO] Scan hoàn tất: 12 SIM(s)
+[2026-04-03 15:39:27] [INFO] Workers started: 12 SIMs
+[2026-04-03 15:39:28] [INFO] ✅ MongoDB connected → JapanSim.sims
+[2026-04-03 15:39:28] [INFO] 🔄 SimSyncService started — sync mỗi 300s
+[2026-04-03 15:39:28] [INFO] ✅ MongoDB sync initialized successfully
+[2026-04-03 15:39:28] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:39:36] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:39:37] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:39:59] [INFO] 📋 SMS MANUAL-639108275965049516 → FAILED
+[2026-04-03 15:39:59] [INFO] SMS Manual: COM163 → 08028391052: FAIL
+[2026-04-03 15:40:41] [INFO] Server disconnected
+[2026-04-03 15:43:40] [INFO] GSM Agent khởi động
+[2026-04-03 15:43:41] [INFO] Auto-scan starting...
+[2026-04-03 15:43:41] [INFO] Manual scan started
+[2026-04-03 15:44:24] [INFO] Scan hoàn tất: 12 SIM(s)
+[2026-04-03 15:44:39] [INFO] Workers started: 12 SIMs
+[2026-04-03 15:44:40] [INFO] ✅ MongoDB connected → JapanSim.sims
+[2026-04-03 15:44:40] [INFO] 🔄 SimSyncService started — sync mỗi 300s
+[2026-04-03 15:44:40] [INFO] ✅ MongoDB sync initialized successfully
+[2026-04-03 15:44:40] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:44:47] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:44:48] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)
+[2026-04-03 15:44:56] [INFO] 📋 SMS MANUAL-639108278921197167 → SENT
+[2026-04-03 15:44:56] [INFO] SMS Manual: COM164 → 08028391052: OK
+[2026-04-03 15:45:17] [INFO] 📋 SMS MANUAL-639108279141607538 → FAILED
+[2026-04-03 15:45:17] [INFO] SMS Manual: COM162 → 08028391052: FAIL
+[2026-04-03 15:45:53] [INFO] Server disconnected
+[2026-04-03 15:46:42] [INFO] GSM Agent khởi động
+[2026-04-03 15:46:43] [INFO] Auto-scan starting...
+[2026-04-03 15:46:43] [INFO] Manual scan started
+[2026-04-03 15:47:25] [INFO] Scan hoàn tất: 12 SIM(s)
+[2026-04-03 15:47:39] [INFO] Workers started: 12 SIMs
+[2026-04-03 15:47:40] [INFO] ✅ MongoDB connected → JapanSim.sims
+[2026-04-03 15:47:40] [INFO] 🔄 SimSyncService started — sync mỗi 300s
+[2026-04-03 15:47:40] [INFO] ✅ MongoDB sync initialized successfully
+[2026-04-03 15:47:40] [INFO] 🔍 Bắt đầu sync SIM cho device 'DESKTOP-G7U2DSC'...
+[2026-04-03 15:47:40] [INFO] SMS Manual: COM162 → 08028391052: OK
+[2026-04-03 15:47:41] [INFO] 📨 Incoming SMS from 08028391052: đã quá pepsi ơi meme
+[2026-04-03 15:47:50] [INFO] 📦 Loaded 592 SIM từ MongoDB
+[2026-04-03 15:47:51] [INFO] 💾 Đã sync 21 SIM vào MongoDB (mới:0, update:12, missing:9)

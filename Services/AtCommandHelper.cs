@@ -1,4 +1,4 @@
-using System.IO.Ports;
+﻿using System.IO.Ports;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -689,7 +689,8 @@ public class AtCommandHelper : IDisposable
                 bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
 
-                SendAndRead("AT+CMGF=1", 500);
+                var cmgfResp = SendAndRead("AT+CMGF=1", 500);
+                System.Diagnostics.Debug.WriteLine($"CMGF Resp: {cmgfResp.Trim().Replace('\r', ' ').Replace('\n', ' ')}");
 
                 // 🔥 Cache SMSC — chỉ check MỘT LẦN, không gọi mỗi SMS
                 if (!_smscConfigured)
@@ -730,7 +731,8 @@ public class AtCommandHelper : IDisposable
                             return false;
                         }
                     }
-                    SendAndRead("AT+CSMP=49,167,0,8", 1000);
+                    var csmpResp = SendAndRead("AT+CSMP=49,167,0,8", 1000);
+                    System.Diagnostics.Debug.WriteLine($"CSMP Resp: {csmpResp.Trim().Replace('\r', ' ').Replace('\n', ' ')}");
                     _lastCharset = "UCS2";
 
                     // Encode nội dung sang UCS-2 hex string (big-endian, network byte order)
@@ -935,8 +937,11 @@ public class AtCommandHelper : IDisposable
         }
         _port.DiscardInBuffer();
 
-        // Gửi AT+CMGS command (destNumber luôn là ASCII digits/+)
-        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destNumber}\"\r");
+        // Gửi AT+CMGS command (Encode destNumber to UCS-2 hex vì CSCS="UCS2" bắt buộc)
+        byte[] destUcs2 = Encoding.BigEndianUnicode.GetBytes(destNumber);
+        string destUcs2Hex = BitConverter.ToString(destUcs2).Replace("-", "");
+        System.Diagnostics.Debug.WriteLine($"Sending AT+CMGS=\"{destUcs2Hex}\" (encoded from {destNumber})");
+        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destUcs2Hex}\"\r");
         _port.BaseStream.Write(cmdBytes, 0, cmdBytes.Length);
 
         if (!WaitForPrompt(5000)) return false;
