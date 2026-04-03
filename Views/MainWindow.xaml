@@ -398,11 +398,38 @@
                                     SortDirection="Ascending"/>
                                 <DataGridTextColumn Header="Slot" Binding="{Binding SlotDisplay}" Width="55"/>
                                 <DataGridTextColumn Header="Trạng thái" Binding="{Binding StatusText}" Width="80"/>
-                                <DataGridTextColumn Header="Số điện thoại" Binding="{Binding PhoneNumber}" Width="120"/>
+                                <DataGridTemplateColumn Header="Số điện thoại" SortMemberPath="PhoneNumber" Width="120">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBox Text="{Binding PhoneNumber, Mode=OneWay}" 
+                                                     IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
+                                                     VerticalContentAlignment="Center" Cursor="IBeam"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="Quốc gia" Binding="{Binding CountryDisplay}" Width="75"/>
                                 <DataGridTextColumn Header="Nhà mạng" Binding="{Binding Provider}" Width="130"/>
-                                <DataGridTextColumn Header="CCID" Binding="{Binding Ccid}" Width="175"/>
-                                <DataGridTextColumn Header="IMSI" Binding="{Binding Imsi}" Width="130"/>
+                                <DataGridTemplateColumn Header="CCID" SortMemberPath="Ccid" Width="175">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBox Text="{Binding Ccid, Mode=OneWay}" 
+                                                     IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
+                                                     VerticalContentAlignment="Center" Cursor="IBeam"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="IMSI" SortMemberPath="Imsi" Width="130">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBox Text="{Binding Imsi, Mode=OneWay}" 
+                                                     IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
+                                                     VerticalContentAlignment="Center" Cursor="IBeam"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="Tín hiệu" Binding="{Binding SignalDisplay}" Width="60"/>
                                 <DataGridTextColumn Header="Gửi OK" Binding="{Binding DailyCountDisplay}" Width="70">
                                     <DataGridTextColumn.ElementStyle>
@@ -562,7 +589,16 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="" Binding="{Binding DirectionIcon}" Width="30"/>
                                 <DataGridTextColumn Header="Loại" Binding="{Binding DirectionText}" Width="45"/>
-                                <DataGridTextColumn Header="Số điện thoại" Binding="{Binding PhoneDisplay}" Width="110"/>
+                                <DataGridTemplateColumn Header="Số điện thoại" SortMemberPath="PhoneDisplay" Width="120">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBox Text="{Binding PhoneDisplay, Mode=OneWay}" 
+                                                     IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridCell}}"
+                                                     VerticalContentAlignment="Center" Cursor="IBeam"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="Nội dung" Binding="{Binding ShortContent}" Width="*"/>
                                 <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeDisplay}" Width="100"/>
                                 <DataGridTextColumn Header="" Binding="{Binding StatusIcon}" Width="30"/>
