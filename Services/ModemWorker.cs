@@ -75,8 +75,8 @@ public class ModemWorker : IDisposable
         }
 
         // 🔥 Bỏ URC — không đáng tin cậy, dùng polling thích ứng thay thế
-        // URC miss: modem bắn 1 CMTI rồi reset, đợi next SMS mới bắn tiếp
-        // URC gộp: nhiều SMS đến cùng lúc → chỉ 1 CMTI → bỏ sót
+        // Tuy nhiên VẪN CẦN BẬT URC để modem biết cách định tuyến SMS và kích hoạt CheckForNewSms nhanh
+        _helper.EnableUrc();
 
         // Đảm bảo SMSC đã được cấu hình — nếu thiếu, SMS sẽ gửi đi nhưng không đến
         _helper.EnsureSmscConfigured();

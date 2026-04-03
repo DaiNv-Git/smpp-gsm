@@ -5,6 +5,7 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
     <RootNamespace>GsmAgent</RootNamespace>
     <AssemblyName>SmsGlobal</AssemblyName>
     <AssemblyTitle>SMS Global</AssemblyTitle>

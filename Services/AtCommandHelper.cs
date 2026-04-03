@@ -1,4 +1,4 @@
-﻿using System.IO.Ports;
+using System.IO.Ports;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -1058,11 +1058,42 @@ public class AtCommandHelper : IDisposable
         catch { return false; }
     }
 
-    /// <summary>Bật URC notification cho SMS mới.</summary>
+    /// <summary>Bật URC notification cho SMS mới + đảm bảo modem sẵn sàng nhận SMS.
+    /// 🔥 FIX: Thử nhiều CNMI config — modem khác nhau hỗ trợ mode khác nhau.
+    /// AT+CNMI=2,1: store SMS + send +CMTI URC (ưu tiên)
+    /// AT+CNMI=1,1: buffer URC khi busy
+    /// AT+CNMI=2,2: deliver SMS trực tiếp qua +CMT (không store)</summary>
     public bool EnableUrc()
     {
+        // Đảm bảo text mode — bắt buộc trước khi nhận SMS
+        SendAndRead("AT+CMGF=1", 500);
+
+        // Thử AT+CNMI=2,1,0,0,0 trước (store + URC)
         var resp = SendAndRead("AT+CNMI=2,1,0,0,0", 1000);
-        return resp.Contains("OK");
+        if (resp.Contains("OK"))
+        {
+            System.Diagnostics.Debug.WriteLine($"📡 [{_port.PortName}] CNMI=2,1 OK (store + URC)");
+            return true;
+        }
+
+        // Fallback: AT+CNMI=1,1,0,0,0 (buffer URC khi busy)
+        resp = SendAndRead("AT+CNMI=1,1,0,0,0", 1000);
+        if (resp.Contains("OK"))
+        {
+            System.Diagnostics.Debug.WriteLine($"📡 [{_port.PortName}] CNMI=1,1 OK (buffer URC)");
+            return true;
+        }
+
+        // Fallback: AT+CNMI=2,2,0,0,0 (deliver qua +CMT, không store)
+        resp = SendAndRead("AT+CNMI=2,2,0,0,0", 1000);
+        if (resp.Contains("OK"))
+        {
+            System.Diagnostics.Debug.WriteLine($"📡 [{_port.PortName}] CNMI=2,2 OK (direct deliver)");
+            return true;
+        }
+
+        System.Diagnostics.Debug.WriteLine($"⚠️ [{_port.PortName}] CNMI not supported — relying on polling only");
+        return false;
     }
 
     /// <summary>Test xem modem có hỗ trợ URC không.</summary>
@@ -1168,25 +1199,25 @@ public class AtCommandHelper : IDisposable
         catch { }
     }
 
-    /// <summary>Đọc SMS UNREAD only — thử nhiều format để tương thích đa số modem.</summary>
+    /// <summary>Đọc SMS UNREAD only — thử nhiều format để tương thích đa số modem.
+    /// 🔥 FIX: Fallback khi kết quả rỗng (không chỉ ERROR) — modem có thể trả OK rỗng
+    /// khi CSCS=UCS2 nhưng filter string là ASCII. Dedup cache trong ModemWorker ngăn lặp tin.</summary>
     public List<(int index, string sender, string content, DateTime time)> ListUnreadSms(int timeoutMs = 5000)
     {
         var messages = new List<(int, string, string, DateTime)>();
         try
         {
-            // 🔥 FIX: Ưu tiên ASCII "REC UNREAD" — đa số modem chấp nhận dù CSCS=UCS2
+            // Step 1: ASCII "REC UNREAD" — đa số modem chấp nhận dù CSCS=UCS2
             var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
             bool gotError = resp.Contains("ERROR");
             bool hasData = resp.Contains("+CMGL");
             System.Diagnostics.Debug.WriteLine(
-                $"📬 ListUnreadSms [REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY (no unread)")}");
+                $"📬 ListUnreadSms [REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
 
-            // 🔥 Chỉ fallback khi modem trả ERROR (không hiểu lệnh)
-            // Nếu REC UNREAD trả OK nhưng rỗng → KHÔNG có tin mới → KHÔNG đọc ALL
-            // (Cũ: luôn fallback ALL → đọc tin cũ đã read → lặp tin)
-            if (gotError && !hasData)
+            // Step 2: UCS2-encoded "REC UNREAD" — cho modem yêu cầu strict UCS2
+            // 🔥 FIX: Thử cả khi kết quả rỗng (không chỉ ERROR) — modem có thể trả OK rỗng
+            if (!hasData)
             {
-                // Fallback 1: UCS2-encoded "REC UNREAD" (cho modem yêu cầu strict UCS2)
                 string unreadHex = EncodeUcs2("REC UNREAD");
                 resp = SendAndRead($"AT+CMGL=\"{unreadHex}\"", timeoutMs);
                 gotError = resp.Contains("ERROR");
@@ -1195,9 +1226,9 @@ public class AtCommandHelper : IDisposable
                     $"📬 ListUnreadSms [UCS2 REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
             }
 
-            if (gotError && !hasData)
+            // Step 3: Integer 0 = "REC UNREAD" (một số modem cũ)
+            if (!hasData)
             {
-                // Fallback 2: Thử integer 0 = "REC UNREAD" (một số modem cũ)
                 resp = SendAndRead("AT+CMGL=0", timeoutMs);
                 gotError = resp.Contains("ERROR");
                 hasData = resp.Contains("+CMGL");
@@ -1205,12 +1236,32 @@ public class AtCommandHelper : IDisposable
                     $"📬 ListUnreadSms [0]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
             }
 
-            if (gotError && !hasData)
+            // Step 4: "ALL" — last resort, dedup cache ngăn lặp tin cũ
+            if (!hasData)
             {
-                // Fallback 3 (cuối cùng): "ALL" — chỉ dùng khi KHÔNG CÓ CÁCH NÀO khác
                 resp = SendAndRead("AT+CMGL=\"ALL\"", timeoutMs);
+                hasData = resp.Contains("+CMGL");
                 System.Diagnostics.Debug.WriteLine(
-                    $"⚠️ ListUnreadSms [ALL fallback]: {(resp.Contains("+CMGL") ? "HAS DATA" : "EMPTY")}");
+                    $"📬 ListUnreadSms [ALL fallback]: {(hasData ? "HAS DATA" : "EMPTY")}");
+
+                // Nếu ALL vẫn rỗng, thử UCS2-encoded "ALL"
+                if (!hasData)
+                {
+                    string allHex = EncodeUcs2("ALL");
+                    resp = SendAndRead($"AT+CMGL=\"{allHex}\"", timeoutMs);
+                    hasData = resp.Contains("+CMGL");
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 ListUnreadSms [UCS2 ALL]: {(hasData ? "HAS DATA" : "EMPTY")}");
+                }
+
+                // Cuối cùng: integer 4 = "ALL" 
+                if (!hasData)
+                {
+                    resp = SendAndRead("AT+CMGL=4", timeoutMs);
+                    hasData = resp.Contains("+CMGL");
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 ListUnreadSms [4]: {(hasData ? "HAS DATA" : "EMPTY")}");
+                }
             }
 
             ParseCmglResponse(resp, messages);
