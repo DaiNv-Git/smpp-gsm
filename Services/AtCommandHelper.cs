@@ -29,8 +29,10 @@ public class AtCommandHelper : IDisposable
         {
             ReadTimeout = 3000,
             WriteTimeout = 3000,
-            Encoding = Encoding.UTF8,   // UTF-8: hỗ trợ tiếng Việt không dấu / số
-                                        // UCS-2 content gửi riêng qua Write(byte[])
+            // 🔥 FIX: Dùng Latin-1 (ISO-8859-1) thay vì UTF-8
+            // UTF-8 decode 0xE0+ thành multi-byte sequence → corrupt UCS-2 raw bytes
+            // Latin-1 map 1:1 byte → char → không mất data
+            Encoding = Encoding.GetEncoding(28591),
             NewLine = "\r\n",
             DtrEnable = true,
             RtsEnable = true,
@@ -894,6 +896,11 @@ public class AtCommandHelper : IDisposable
             return false;
         }
 
+        // 🔥 FIX: Set UDHI bit (bit 6) trong CSMP first octet
+        // 49 (0x31) | 0x40 = 113 (0x71) → modem biết content có UDH header
+        // Nếu không set, điện thoại nhận sẽ hiển thị UDH bytes thành ký tự rác
+        SendAndRead("AT+CSMP=113,167,0,8", 1000);
+
         // Generate random reference ID (2 bytes, big-endian)
         var rand = new Random();
         int refId = rand.Next(1, 255);
@@ -933,6 +940,9 @@ public class AtCommandHelper : IDisposable
             if (part < totalParts)
                 Thread.Sleep(300);
         }
+
+        // 🔥 FIX: Restore CSMP về bình thường (không UDHI) cho SMS đơn tiếp theo
+        SendAndRead("AT+CSMP=49,167,0,8", 500);
 
         return true;
     }
@@ -1297,7 +1307,7 @@ public class AtCommandHelper : IDisposable
                 }
             }
 
-            ParseCmglResponse(resp, messages);
+            ParseCmglResponse(resp, messages, _readCharsetUcs2);
             System.Diagnostics.Debug.WriteLine(
                 $"📬 ListUnreadSms result: {messages.Count} messages parsed");
         }
@@ -1309,8 +1319,9 @@ public class AtCommandHelper : IDisposable
     }
 
 
-    /// <summary>Parse CMGL response chung (dùng cho cả UNREAD và ALL).</summary>
-    private void ParseCmglResponse(string resp, List<(int, string, string, DateTime)> messages)
+    /// <summary>Parse CMGL response chung (dùng cho cả UNREAD và ALL).
+    /// 🔥 FIX: Khi isUcs2Mode=true, force decode tất cả fields — không dùng heuristic.</summary>
+    private void ParseCmglResponse(string resp, List<(int, string, string, DateTime)> messages, bool isUcs2Mode = false)
     {
         var lines = resp.Split('\n');
         for (int i = 0; i < lines.Length; i++)
@@ -1323,7 +1334,7 @@ public class AtCommandHelper : IDisposable
             if (!indexMatch.Success || i + 1 >= lines.Length)
                 continue;
 
-            var quotedFields = ExtractQuotedFields(line);
+            var quotedFields = ExtractQuotedFields(line, isUcs2Mode);
             if (quotedFields.Count == 0)
                 continue;
 
@@ -1345,7 +1356,8 @@ public class AtCommandHelper : IDisposable
                 }
                 string rawContent = contentSb.ToString();
                 // Content không nằm trong ngoặc kép theo format CMGL, nên phải tự decode riêng phần này
-                string decodedContent = DecodeUcs2IfNeeded(rawContent);
+                // 🔥 FIX: Khi biết chắc modem trả UCS2 hex → force decode (không heuristic)
+                string decodedContent = isUcs2Mode ? ForceDecodeUcs2(rawContent) : DecodeUcs2IfNeeded(rawContent);
 
                 var time = ParseSmsTimestamp(timestamp);
                 if (!string.IsNullOrWhiteSpace(decodedContent))
@@ -1354,15 +1366,16 @@ public class AtCommandHelper : IDisposable
         }
     }
 
-    private static List<string> ExtractQuotedFields(string line)
+    private static List<string> ExtractQuotedFields(string line, bool isUcs2Mode = false)
     {
         var fields = new List<string>();
         foreach (Match match in Regex.Matches(line, @"""([^""]*)"""))
         {
             if (match.Groups.Count > 1)
             {
-                // Decode ngay lập tức vì khi CSCS=UCS2, modem có thể trả về MỌI field (kể cả timestamp) dạng UCS2 hex
-                fields.Add(DecodeUcs2IfNeeded(match.Groups[1].Value));
+                // 🔥 FIX: Khi biết chắc UCS2 mode → force decode (không heuristic sai cho SĐT/timestamp)
+                var raw = match.Groups[1].Value;
+                fields.Add(isUcs2Mode ? ForceDecodeUcs2(raw) : DecodeUcs2IfNeeded(raw));
             }
         }
         return fields;
@@ -1464,15 +1477,20 @@ public class AtCommandHelper : IDisposable
         if (string.IsNullOrWhiteSpace(text)) return text;
         text = text.Trim();
 
+        // Xóa byte xuống dòng để regex Hex khớp đúng cho SMS chia nhiều dòng
+        string cleanHex = text.Replace("\n", "").Replace("\r", "").Replace(" ", "");
+
         // Check if UCS2 encoded (hex string, length divisible by 4)
-        if (Regex.IsMatch(text, @"^[0-9A-Fa-f]+$") && text.Length % 4 == 0 && text.Length >= 8)
+        // 🔥 FIX: Giảm min từ 8 → 4 (1 ký tự Unicode = 4 hex chars)
+        // Cho phép SMS ngắn tiếng Nhật/Việt ("あ" = 3042) decode đúng
+        if (Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$") && cleanHex.Length % 4 == 0 && cleanHex.Length >= 4)
         {
             try
             {
                 var sb = new StringBuilder();
-                for (int i = 0; i < text.Length; i += 4)
+                for (int i = 0; i < cleanHex.Length; i += 4)
                 {
-                    int code = Convert.ToInt32(text.Substring(i, 4), 16);
+                    int code = Convert.ToInt32(cleanHex.Substring(i, 4), 16);
                     sb.Append((char)code);
                 }
                 var decoded = sb.ToString();
@@ -1487,6 +1505,32 @@ public class AtCommandHelper : IDisposable
             catch { return text; }
         }
         return text;
+    }
+
+    /// <summary>
+    /// 🔥 Force decode UCS2 hex — dùng khi BIẾT CHẮC modem đang trả UCS2 hex.
+    /// Không dùng heuristic (50% printable) → tránh false negative cho SMS ngắn/số.
+    /// </summary>
+    public static string ForceDecodeUcs2(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        string cleanHex = text.Trim().Replace("\n", "").Replace("\r", "").Replace(" ", "");
+
+        if (cleanHex.Length == 0) return text;
+        if (cleanHex.Length % 4 != 0) return text; // Không phải valid UCS2 hex
+        if (!Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$")) return text; // Không phải hex
+
+        try
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < cleanHex.Length; i += 4)
+            {
+                int code = Convert.ToInt32(cleanHex.Substring(i, 4), 16);
+                sb.Append((char)code);
+            }
+            return sb.ToString();
+        }
+        catch { return text; }
     }
 
     // ==================== VOICE CALL ====================

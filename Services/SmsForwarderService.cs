@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using System.Net.Http;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.Channels;
 using System.Collections.Concurrent;
@@ -102,7 +103,11 @@ public partial class SmsForwarderService : IDisposable
                             message = task.Message
                         };
 
-                        var json = JsonSerializer.Serialize(payload);
+                        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+                        {
+                            // 🔥 FIX: Giữ nguyên ký tự Unicode (tiếng Việt/Nhật) thay vì escape \uXXXX
+                            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                        });
                         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
                         System.Diagnostics.Debug.WriteLine(
