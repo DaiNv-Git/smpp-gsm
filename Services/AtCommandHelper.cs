@@ -1250,12 +1250,25 @@ public class AtCommandHelper : IDisposable
             SendAndRead("AT+CMGF=1", 500);
             // 🔥 FIX: Dùng UCS2 để content trả về là hex string → DecodeUcs2IfNeeded decode đúng
             // Trước đây dùng GSM → tiếng Việt/Nhật bị garbled
-            var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 1000);
+            var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+            Logger.Info($"[{_port.PortName}] AT+CSCS=\"UCS2\" resp: {cscsResp.Trim()}");
             if (!cscsResp.Contains("OK"))
             {
-                // Fallback: modem không hỗ trợ UCS2 listing → dùng GSM
-                SendAndRead("AT+CSCS=\"GSM\"", 500);
-                _readCharsetUcs2 = false;
+                Thread.Sleep(200);
+                cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
+                Logger.Info($"[{_port.PortName}] AT+CSCS=\"UCS2\" RETRY resp: {cscsResp.Trim()}");
+                
+                if (!cscsResp.Contains("OK"))
+                {
+                    // Fallback: modem không hỗ trợ UCS2 listing → dùng GSM
+                    var gsmResp = SendAndRead("AT+CSCS=\"GSM\"", 500);
+                    Logger.Info($"[{_port.PortName}] Fallback AT+CSCS=\"GSM\" resp: {gsmResp.Trim()}");
+                    _readCharsetUcs2 = false;
+                }
+                else
+                {
+                    _readCharsetUcs2 = true;
+                }
             }
             else
             {
@@ -1339,10 +1352,9 @@ public class AtCommandHelper : IDisposable
     }
 
 
-    /// <summary>Parse CMGL response chung (dùng cho cả UNREAD và ALL).
-    /// 🔥 FIX: Khi isUcs2Mode=true, force decode tất cả fields — không dùng heuristic.</summary>
     private void ParseCmglResponse(string resp, List<(int, string, string, DateTime)> messages, bool isUcs2Mode = false)
     {
+        Logger.Info($"RAW CMGL (isUcs2={isUcs2Mode}): {resp}");
         var lines = resp.Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
@@ -1598,6 +1610,22 @@ public class AtCommandHelper : IDisposable
         return sb.ToString();
     }
 
+    /// <summary>
+    /// 🔥 Khôi phục chuẩn văn bản UTF-8 khi đọc nguyên chuỗi bytes từ SerialPort Latin-1.
+    /// SerialPort.Encoding = 28591 (Latin-1) giúp bảo vệ toàn vẹn từng Byte (0-255).
+    /// Nếu SMS nhận được thực chất là chuỗi UTF-8 chưa decode, hàm này sẽ dịch chuẩn xác.
+    /// </summary>
+    private static string RecoverRawUtf8FromLatin1(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        try
+        {
+            var bytes = Encoding.GetEncoding(28591).GetBytes(text);
+            return Encoding.UTF8.GetString(bytes).Replace("\0", "");
+        }
+        catch { return text; }
+    }
+
     public static string DecodeUcs2IfNeeded(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return text;
@@ -1641,11 +1669,11 @@ public class AtCommandHelper : IDisposable
                 int printableCount = decoded.Count(c => !char.IsControl(c) || c == '\n' || c == '\r' || c == '\t');
                 if (printableCount >= decoded.Length * 0.5)
                     return decoded;
-                return text;
+                return RecoverRawUtf8FromLatin1(text);
             }
-            catch { return text; }
+            catch { return RecoverRawUtf8FromLatin1(text); }
         }
-        return text;
+        return RecoverRawUtf8FromLatin1(text);
     }
 
     /// <summary>
@@ -1658,8 +1686,8 @@ public class AtCommandHelper : IDisposable
         if (string.IsNullOrWhiteSpace(text)) return text;
         string cleanHex = text.Trim().Replace("\n", "").Replace("\r", "").Replace(" ", "");
 
-        if (cleanHex.Length == 0) return text;
-        if (!Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$")) return text; // Không phải hex
+        if (cleanHex.Length == 0) return RecoverRawUtf8FromLatin1(text);
+        if (!Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$")) return RecoverRawUtf8FromLatin1(text); // Không phải hex
 
         try
         {
@@ -1691,7 +1719,7 @@ public class AtCommandHelper : IDisposable
             }
             return sb.ToString();
         }
-        catch { return text; }
+        catch { return RecoverRawUtf8FromLatin1(text); }
     }
 
     // ==================== VOICE CALL ====================
