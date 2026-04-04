@@ -281,7 +281,86 @@ public class SerialPortManager : IDisposable
         using var helper = TryOpenPort(comPort, _settings.BaudRate);
         if (helper == null) return null; // Port thật sự không mở được
 
-        // 🔥 Thu thập từng bước — mỗi bước try-catch riêng, không mất data đã đọc
+        // ═══════ BƯỚC 0: CHẨN ĐOÁN SIM TOÀN DIỆN ═══════
+        var diag = helper.DiagnoseSimCard();
+
+        System.Diagnostics.Debug.WriteLine(
+            $"🩺 [{comPort}] Diagnostic: {diag.Category} — {diag.Detail}");
+
+        // COM hỏng — modem không phản hồi
+        if (diag.Category == DiagnosticCategory.ComPortBroken)
+        {
+            return new SimCard
+            {
+                ComPort = comPort,
+                Status = SimStatus.Error,
+                Diagnostic = diag.Category,
+                DiagnosticDetail = diag.Detail,
+                SimPinStatus = diag.SimPinStatus,
+                ErrorMessage = diag.Detail,
+            };
+        }
+
+        // Cổng COM mở được nhưng không có SIM
+        if (diag.Category == DiagnosticCategory.ComPortNoSim)
+        {
+            return new SimCard
+            {
+                ComPort = comPort,
+                Status = SimStatus.Error,
+                Diagnostic = diag.Category,
+                DiagnosticDetail = diag.Detail,
+                SimPinStatus = diag.SimPinStatus,
+                ErrorMessage = diag.Detail,
+            };
+        }
+
+        // SIM bị hỏng
+        if (diag.Category == DiagnosticCategory.SimBroken)
+        {
+            return new SimCard
+            {
+                ComPort = comPort,
+                Status = SimStatus.Error,
+                Diagnostic = diag.Category,
+                DiagnosticDetail = diag.Detail,
+                SimPinStatus = diag.SimPinStatus,
+                ErrorMessage = diag.Detail,
+            };
+        }
+
+        // SIM cần PIN / bị khóa PUK
+        if (diag.Category == DiagnosticCategory.SimNeedPin ||
+            diag.Category == DiagnosticCategory.SimLocked)
+        {
+            return new SimCard
+            {
+                ComPort = comPort,
+                Status = SimStatus.Error,
+                Diagnostic = diag.Category,
+                DiagnosticDetail = diag.Detail,
+                SimPinStatus = diag.SimPinStatus,
+                ErrorMessage = diag.Detail,
+            };
+        }
+
+        // SIM bận / chưa sẵn sàng — tạm thời
+        if (diag.Category == DiagnosticCategory.SimBusy ||
+            diag.Category == DiagnosticCategory.SimNotReady)
+        {
+            return new SimCard
+            {
+                ComPort = comPort,
+                Status = SimStatus.Error,
+                Diagnostic = diag.Category,
+                DiagnosticDetail = diag.Detail,
+                SimPinStatus = diag.SimPinStatus,
+                ErrorMessage = diag.Detail,
+            };
+        }
+
+        // ═══════ SIM PRESENT (READY) — THU THẬP DATA ═══════
+        // Từ đây SIM đã READY, thu thập từng bước
         string? ccid = null;
         string? imsi = null;
         string? phone = null;
@@ -300,17 +379,11 @@ public class SerialPortManager : IDisposable
             System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] GetCcid error: {ex.Message}");
         }
 
-        // Nếu không có CCID → vẫn trả SimCard với status Error (không return null)
+        // CCID fail nhưng SIM READY → vẫn tiếp tục (modem lạ)
         if (string.IsNullOrWhiteSpace(ccid))
         {
-            return new SimCard
-            {
-                ComPort = comPort,
-                Status = SimStatus.Error,
-                ErrorMessage = errors.Count > 0
-                    ? string.Join("; ", errors)
-                    : "Không đọc được CCID — có thể không có SIM",
-            };
+            errors.Add("Không đọc được CCID (SIM vẫn READY)");
+            System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] CCID fail nhưng CPIN=READY — tiếp tục");
         }
 
         // 2. IMSI
@@ -351,7 +424,7 @@ public class SerialPortManager : IDisposable
         if (string.IsNullOrWhiteSpace(phone))
         {
             // 4a. Try MongoDB trực tiếp
-            if (_mongoDb != null)
+            if (_mongoDb != null && !string.IsNullOrWhiteSpace(ccid))
             {
                 try
                 {
@@ -375,7 +448,7 @@ public class SerialPortManager : IDisposable
             }
 
             // 4b. Fallback: query via BE API
-            if (string.IsNullOrWhiteSpace(phone))
+            if (string.IsNullOrWhiteSpace(phone) && !string.IsNullOrWhiteSpace(ccid))
             {
                 try
                 {
@@ -420,6 +493,25 @@ public class SerialPortManager : IDisposable
             System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] QueryOperator error: {ex.Message}");
         }
 
+        // Determine final status based on diagnostic + data
+        var finalStatus = SimStatus.Online;
+        if (diag.Category == DiagnosticCategory.SimNoNetwork ||
+            diag.Category == DiagnosticCategory.SimDenied)
+        {
+            // SIM present but no network — still mark as Error so worker doesn't start
+            finalStatus = SimStatus.Error;
+        }
+        else if (diag.Category == DiagnosticCategory.SimSearching)
+        {
+            // Still searching — can retry later
+            finalStatus = SimStatus.Error;
+        }
+        else if (string.IsNullOrWhiteSpace(ccid) && string.IsNullOrWhiteSpace(imsi))
+        {
+            // No data at all
+            finalStatus = SimStatus.Error;
+        }
+
         return new SimCard
         {
             ComPort = comPort,
@@ -428,10 +520,15 @@ public class SerialPortManager : IDisposable
             PhoneNumber = phone,
             Provider = provider,
             SignalLevel = signal,
-            Status = SimStatus.Online,
+            Status = finalStatus,
+            Diagnostic = diag.Category,
+            DiagnosticDetail = diag.Detail,
+            SimPinStatus = diag.SimPinStatus,
+            NetworkRegStatus = diag.NetworkStatus,
             ErrorMessage = errors.Count > 0 ? string.Join("; ", errors) : null,
         };
     }
+
 
     /// <summary>Tra MongoDB qua BE API: GET /api/dashboard/sim-lookup?ccid=xxx&fuzzy=true
     /// Fuzzy mode: match 18 ký tự liên tục của CCID (like old Java system).</summary>

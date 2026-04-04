@@ -1,4 +1,5 @@
 using System.Linq;
+using GsmAgent.Services;
 
 namespace GsmAgent.Models;
 
@@ -15,6 +16,17 @@ public class SimCard
 
     /// <summary>Thông tin lỗi khi scan (COM port hỏng, modem không phản hồi, v.v.)</summary>
     public string? ErrorMessage { get; set; }
+
+    // 🩺 SIM Diagnostics
+    /// <summary>Kết quả chẩn đoán SIM chi tiết (từ AT+CPIN?, AT+CREG?)</summary>
+    public DiagnosticCategory Diagnostic { get; set; } = DiagnosticCategory.Unknown;
+    /// <summary>Mô tả chi tiết chẩn đoán</summary>
+    public string? DiagnosticDetail { get; set; }
+    /// <summary>Trạng thái PIN SIM (READY, SIM PIN, NOT INSERTED, v.v.)</summary>
+    public string? SimPinStatus { get; set; }
+    /// <summary>Trạng thái đăng ký mạng (0-5, -1=unknown)</summary>
+    public int NetworkRegStatus { get; set; } = -1;
+
     public int TotalSent { get; set; }
     public int TotalFailed { get; set; }
     public DateTime? LastActiveAt { get; set; }
@@ -66,6 +78,16 @@ public class SimCard
     /// <summary>Trạng thái text thuần (không emoji) — cho bảng kiểu Dangs Modem.</summary>
     public string StatusText => this switch
     {
+        { Diagnostic: DiagnosticCategory.ComPortBroken } => "COM hỏng",
+        { Diagnostic: DiagnosticCategory.ComPortNoSim } => "Không có SIM",
+        { Diagnostic: DiagnosticCategory.SimBroken } => "SIM hỏng",
+        { Diagnostic: DiagnosticCategory.SimNeedPin } => "Cần PIN",
+        { Diagnostic: DiagnosticCategory.SimLocked } => "SIM khóa",
+        { Diagnostic: DiagnosticCategory.SimNoNetwork } => "Mất mạng",
+        { Diagnostic: DiagnosticCategory.SimDenied } => "Bị từ chối",
+        { Diagnostic: DiagnosticCategory.SimSearching } => "Tìm mạng",
+        { Diagnostic: DiagnosticCategory.SimBusy } => "SIM bận",
+        { Diagnostic: DiagnosticCategory.SimNotReady } => "Chưa sẵn sàng",
         { Status: SimStatus.Error } => "Hỏng",
         { IsMissingPhone: true, Status: SimStatus.Online } => "Thiếu SĐT",
         { IsBlocked: true } => "Bị chặn",
@@ -74,6 +96,35 @@ public class SimCard
         { Status: SimStatus.Busy } => "Đang gửi",
         { Status: SimStatus.Offline } => "Chưa kết nối",
         _ => "Ổn định"
+    };
+
+    /// <summary>Icon chẩn đoán — hiện ở cột trạng thái</summary>
+    public string DiagnosticIcon => Diagnostic switch
+    {
+        DiagnosticCategory.ComPortBroken => "🔴",
+        DiagnosticCategory.ComPortNoSim => "⚫",
+        DiagnosticCategory.SimBroken => "💀",
+        DiagnosticCategory.SimNeedPin => "🔐",
+        DiagnosticCategory.SimLocked => "🔒",
+        DiagnosticCategory.SimNoNetwork => "📵",
+        DiagnosticCategory.SimDenied => "🚫",
+        DiagnosticCategory.SimSearching => "🔍",
+        DiagnosticCategory.SimBusy => "⏳",
+        DiagnosticCategory.SimNotReady => "⏳",
+        DiagnosticCategory.SimOk => "✅",
+        _ => "⚪"
+    };
+
+    /// <summary>Mô tả đăng ký mạng</summary>
+    public string NetworkRegDisplay => NetworkRegStatus switch
+    {
+        0 => "Chưa đăng ký",
+        1 => "Home",
+        2 => "Đang tìm...",
+        3 => "Bị từ chối",
+        4 => "Không rõ",
+        5 => "Roaming",
+        _ => "N/A"
     };
 
     /// <summary>Slot hiển thị dựa trên COM port number (COM33 → 1/31).</summary>

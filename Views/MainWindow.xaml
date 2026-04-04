@@ -154,81 +154,120 @@
         </Border>
 
         <!-- ═══════════════ STATS CARDS ═══════════════ -->
-        <Border Grid.Row="1" Padding="12,10" Background="{StaticResource BgPrimaryBrush}">
-            <UniformGrid Columns="6" Rows="1">
+        <Border Grid.Row="1" Padding="12,8" Background="{StaticResource BgPrimaryBrush}">
+            <UniformGrid Columns="9" Rows="1">
                 <!-- SIMs Online -->
-                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
                     BorderThickness="1" BorderBrush="#1a3fb950"
                     Background="#0d3fb950">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding OnlineSimCount}" FontSize="22" FontWeight="Bold"
+                        <TextBlock Text="{Binding OnlineSimCount}" FontSize="20" FontWeight="Bold"
                             Foreground="{StaticResource AccentGreenBrush}" HorizontalAlignment="Center"/>
-                        <TextBlock Text="SIMs Online" FontSize="9"
+                        <TextBlock Text="SIMs Online" FontSize="8.5"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <!-- Sent -->
-                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
                     BorderThickness="1" BorderBrush="#1a58a6ff"
                     Background="#0d58a6ff">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding TotalSentCount}" FontSize="22" FontWeight="Bold"
+                        <TextBlock Text="{Binding TotalSentCount}" FontSize="20" FontWeight="Bold"
                             Foreground="{StaticResource AccentBlueBrush}" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Đã gửi" FontSize="9"
+                        <TextBlock Text="Đã gửi" FontSize="8.5"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <!-- Queue -->
-                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
                     BorderThickness="1" BorderBrush="#1ad29922"
                     Background="#0dd29922">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding TotalQueueSize}" FontSize="22" FontWeight="Bold"
+                        <TextBlock Text="{Binding TotalQueueSize}" FontSize="20" FontWeight="Bold"
                             Foreground="{StaticResource AccentYellowBrush}" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Hàng đợi" FontSize="9"
+                        <TextBlock Text="Hàng đợi" FontSize="8.5"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <!-- Missing Phone -->
-                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
                     BorderThickness="1" BorderBrush="#1ae3b341"
                     Background="#0de3b341">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding MissingPhoneCount}" FontSize="22" FontWeight="Bold"
+                        <TextBlock Text="{Binding MissingPhoneCount}" FontSize="20" FontWeight="Bold"
                             Foreground="#e3b341" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Thiếu SĐT" FontSize="9"
+                        <TextBlock Text="Thiếu SĐT" FontSize="8.5"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <!-- Rate Limited -->
-                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
                     BorderThickness="1" BorderBrush="#1af85149"
                     Background="#0df85149">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding RateLimitedCount}" FontSize="22" FontWeight="Bold"
+                        <TextBlock Text="{Binding RateLimitedCount}" FontSize="20" FontWeight="Bold"
                             Foreground="{StaticResource AccentRedBrush}" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Bị giới hạn" FontSize="9"
+                        <TextBlock Text="Bị giới hạn" FontSize="8.5"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>
                 </Border>
 
-                <!-- Error Ports -->
-                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                <!-- 🩺 COM hỏng -->
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
                     BorderThickness="1" BorderBrush="#1aff6b6b"
                     Background="#0dff6b6b">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding ErrorPortCount}" FontSize="22" FontWeight="Bold"
+                        <TextBlock Text="{Binding ErrorPortCount}" FontSize="20" FontWeight="Bold"
                             Foreground="#ff6b6b" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Cổng hỏng" FontSize="9"
+                        <TextBlock Text="COM hỏng" FontSize="8.5"
+                            Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
+                            Margin="0,-2,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 🩺 Không SIM -->
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
+                    BorderThickness="1" BorderBrush="#1a8b8b8b"
+                    Background="#0d8b8b8b">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding NoSimCount}" FontSize="20" FontWeight="Bold"
+                            Foreground="#8b8b8b" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Không SIM" FontSize="8.5"
+                            Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
+                            Margin="0,-2,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 🩺 SIM hỏng -->
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
+                    BorderThickness="1" BorderBrush="#1ae879f9"
+                    Background="#0de879f9">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding SimBrokenCount}" FontSize="20" FontWeight="Bold"
+                            Foreground="#e879f9" HorizontalAlignment="Center"/>
+                        <TextBlock Text="SIM hỏng" FontSize="8.5"
+                            Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
+                            Margin="0,-2,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 🩺 Mất mạng -->
+                <Border CornerRadius="8" Margin="2" Padding="8,6"
+                    BorderThickness="1" BorderBrush="#1afb923c"
+                    Background="#0dfb923c">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding NoNetworkCount}" FontSize="20" FontWeight="Bold"
+                            Foreground="#fb923c" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Mất mạng" FontSize="8.5"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>
@@ -373,7 +412,57 @@
                                     <Setter Property="Margin" Value="0"/>
                                     <Setter Property="Padding" Value="0"/>
                                     <Style.Triggers>
-                                        <!-- 🔴 Hỏng = đỏ đậm (COM port chết, modem không phản hồi) -->
+                                        <!-- 🔴 COM hỏng = đỏ đậm -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="COM hỏng">
+                                            <Setter Property="Background" Value="#30f85149"/>
+                                            <Setter Property="Foreground" Value="#ff8a80"/>
+                                        </DataTrigger>
+                                        <!-- ⚫ Không có SIM = xám tối -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Không có SIM">
+                                            <Setter Property="Background" Value="#208b8b8b"/>
+                                            <Setter Property="Foreground" Value="#a0a0a0"/>
+                                        </DataTrigger>
+                                        <!-- 💀 SIM hỏng = tím -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="SIM hỏng">
+                                            <Setter Property="Background" Value="#25e879f9"/>
+                                            <Setter Property="Foreground" Value="#f0b0ff"/>
+                                        </DataTrigger>
+                                        <!-- 🔐 Cần PIN = tím nhạt -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Cần PIN">
+                                            <Setter Property="Background" Value="#20e879f9"/>
+                                            <Setter Property="Foreground" Value="#e0a0f0"/>
+                                        </DataTrigger>
+                                        <!-- 🔒 SIM khóa = tím đậm -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="SIM khóa">
+                                            <Setter Property="Background" Value="#28e879f9"/>
+                                            <Setter Property="Foreground" Value="#f0b0ff"/>
+                                        </DataTrigger>
+                                        <!-- 📵 Mất mạng = cam -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Mất mạng">
+                                            <Setter Property="Background" Value="#22fb923c"/>
+                                            <Setter Property="Foreground" Value="#ffc080"/>
+                                        </DataTrigger>
+                                        <!-- 🚫 Bị từ chối = cam đậm -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Bị từ chối">
+                                            <Setter Property="Background" Value="#25fb923c"/>
+                                            <Setter Property="Foreground" Value="#ffb060"/>
+                                        </DataTrigger>
+                                        <!-- 🔍 Tìm mạng = vàng -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Tìm mạng">
+                                            <Setter Property="Background" Value="#1ae3b341"/>
+                                            <Setter Property="Foreground" Value="#ffe0a0"/>
+                                        </DataTrigger>
+                                        <!-- ⏳ SIM bận = vàng nhạt -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="SIM bận">
+                                            <Setter Property="Background" Value="#15e3b341"/>
+                                            <Setter Property="Foreground" Value="#ffe0a0"/>
+                                        </DataTrigger>
+                                        <!-- ⏳ Chưa sẵn sàng = vàng nhạt -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Chưa sẵn sàng">
+                                            <Setter Property="Background" Value="#15e3b341"/>
+                                            <Setter Property="Foreground" Value="#ffe0a0"/>
+                                        </DataTrigger>
+                                        <!-- 🔴 Hỏng (cũ) = đỏ đậm -->
                                         <DataTrigger Binding="{Binding StatusText}" Value="Hỏng">
                                             <Setter Property="Background" Value="#30f85149"/>
                                             <Setter Property="Foreground" Value="#ff8a80"/>
@@ -415,8 +504,8 @@
                                 <DataGridCheckBoxColumn Width="30"/>
                                 <DataGridTextColumn Header="Cổng" Binding="{Binding ComPort}" Width="65"
                                     SortDirection="Ascending"/>
-                                <DataGridTextColumn Header="Slot" Binding="{Binding SlotDisplay}" Width="55"/>
-                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding StatusText}" Width="80"/>
+                                <DataGridTextColumn Header="" Binding="{Binding DiagnosticIcon}" Width="28"/>
+                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding StatusText}" Width="90"/>
                                 <DataGridTemplateColumn Header="Số điện thoại" SortMemberPath="PhoneNumber" Width="120">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
@@ -429,8 +518,15 @@
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="Quốc gia" Binding="{Binding CountryDisplay}" Width="75"/>
-                                <DataGridTextColumn Header="Nhà mạng" Binding="{Binding Provider}" Width="130"/>
-                                <DataGridTemplateColumn Header="CCID" SortMemberPath="Ccid" Width="175">
+                                <DataGridTextColumn Header="Nhà mạng" Binding="{Binding Provider}" Width="110"/>
+                                <DataGridTextColumn Header="Mạng" Binding="{Binding NetworkRegDisplay}" Width="65">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="FontSize" Value="10"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTemplateColumn Header="CCID" SortMemberPath="Ccid" Width="155">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBox Text="{Binding Ccid, Mode=OneWay}" 
@@ -441,7 +537,7 @@
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
-                                <DataGridTemplateColumn Header="IMSI" SortMemberPath="Imsi" Width="130">
+                                <DataGridTemplateColumn Header="IMSI" SortMemberPath="Imsi" Width="120">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBox Text="{Binding Imsi, Mode=OneWay}" 
@@ -452,8 +548,8 @@
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="Tín hiệu" Binding="{Binding SignalDisplay}" Width="60"/>
-                                <DataGridTextColumn Header="Gửi OK" Binding="{Binding DailyCountDisplay}" Width="70">
+                                <DataGridTextColumn Header="Tín hiệu" Binding="{Binding SignalDisplay}" Width="55"/>
+                                <DataGridTextColumn Header="Gửi OK" Binding="{Binding DailyCountDisplay}" Width="65">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Foreground" Value="{StaticResource AccentGreenBrush}"/>
@@ -461,7 +557,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="Gửi lỗi" Binding="{Binding TotalFailed}" Width="55">
+                                <DataGridTextColumn Header="Gửi lỗi" Binding="{Binding TotalFailed}" Width="50">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Foreground" Value="{StaticResource AccentRedBrush}"/>
@@ -469,8 +565,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="Hàng đợi" Binding="{Binding QueueSize}" Width="60"/>
-                                <DataGridTextColumn Header="Ghi chú" Binding="{Binding ErrorMessage}" Width="*">
+                                <DataGridTextColumn Header="Chẩn đoán" Binding="{Binding DiagnosticDetail}" Width="*">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>

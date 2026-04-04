@@ -29,6 +29,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _missingPhoneCount;
     [ObservableProperty] private string _scanStatus = "";
     [ObservableProperty] private int _errorPortCount;
+    [ObservableProperty] private int _noSimCount;       // Cổng COM không nhận SIM
+    [ObservableProperty] private int _simBrokenCount;   // SIM hỏng / khóa
+    [ObservableProperty] private int _noNetworkCount;   // SIM mất mạng
     [ObservableProperty] private string _statusMessage = "Sẵn sàng";
     [ObservableProperty] private AppSettings _settings;
     [ObservableProperty] private string _selectedFilter = "ALL";
@@ -564,7 +567,21 @@ public partial class MainViewModel : ObservableObject
         // 🔥 FIX: Đếm TẤT CẢ SIM thiếu số điện thoại (kể cả chưa kết nối worker)
         MissingPhoneCount = SimList.Count(s => s.IsMissingPhone);
         // 🔥 Đếm COM port hỏng (scan thất bại)
-        ErrorPortCount = SimList.Count(s => s.Status == SimStatus.Error);
+        ErrorPortCount = SimList.Count(s =>
+            s.Diagnostic == DiagnosticCategory.ComPortBroken ||
+            (s.Status == SimStatus.Error && s.Diagnostic == DiagnosticCategory.Unknown));
+        // 🩺 Đếm cổng không có SIM
+        NoSimCount = SimList.Count(s => s.Diagnostic == DiagnosticCategory.ComPortNoSim);
+        // 🩺 Đếm SIM hỏng / khóa / cần PIN
+        SimBrokenCount = SimList.Count(s =>
+            s.Diagnostic == DiagnosticCategory.SimBroken ||
+            s.Diagnostic == DiagnosticCategory.SimNeedPin ||
+            s.Diagnostic == DiagnosticCategory.SimLocked);
+        // 🩺 Đếm SIM mất mạng
+        NoNetworkCount = SimList.Count(s =>
+            s.Diagnostic == DiagnosticCategory.SimNoNetwork ||
+            s.Diagnostic == DiagnosticCategory.SimDenied ||
+            s.Diagnostic == DiagnosticCategory.SimSearching);
 
         // 🔥 Cập nhật danh sách SIM có số ĐT (cho dropdown gửi SMS / gọi điện)
         var withPhone = SimList.Where(s => !string.IsNullOrWhiteSpace(s.PhoneNumber) && s.Status != SimStatus.Error).ToList();

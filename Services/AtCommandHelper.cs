@@ -660,11 +660,36 @@ public class AtCommandHelper : IDisposable
     public static string DetectProvider(string? imsi)
     {
         if (string.IsNullOrWhiteSpace(imsi)) return "Unknown";
+
+        // 🇻🇳 Vietnam
         if (imsi.StartsWith("45204") || imsi.StartsWith("45205")) return "Viettel (VN)";
         if (imsi.StartsWith("45201")) return "Mobifone (VN)";
         if (imsi.StartsWith("45202")) return "Vinaphone (VN)";
+
+        // 🇯🇵 Japan — MNO
         if (imsi.StartsWith("44010")) return "NTT Docomo (JP)";
         if (imsi.StartsWith("44011")) return "Rakuten Mobile (JP)";
+        if (imsi.StartsWith("44020")) return "SoftBank (JP)";
+        if (imsi.StartsWith("44000") || imsi.StartsWith("44001") ||
+            imsi.StartsWith("44002") || imsi.StartsWith("44003"))
+            return "Y!mobile (JP)";
+        if (imsi.StartsWith("44050") || imsi.StartsWith("44051") ||
+            imsi.StartsWith("44053") || imsi.StartsWith("44054") ||
+            imsi.StartsWith("44070") || imsi.StartsWith("44071") ||
+            imsi.StartsWith("44072") || imsi.StartsWith("44073") ||
+            imsi.StartsWith("44074") || imsi.StartsWith("44075") ||
+            imsi.StartsWith("44076"))
+            return "KDDI/AU (JP)";
+
+        // 🇯🇵 Japan — MVNO (dùng mạng Docomo/AU/SoftBank)
+        if (imsi.StartsWith("44012")) return "IIJmio (JP)";
+        if (imsi.StartsWith("44013")) return "Mineo (JP)";
+        if (imsi.StartsWith("44052")) return "UQ mobile (JP)";
+        if (imsi.StartsWith("44021")) return "LINE Mobile (JP)";
+
+        // 🇯🇵 Fallback: MCC 440/441 = Japan
+        if (imsi.StartsWith("440") || imsi.StartsWith("441")) return "JP Carrier";
+
         return "Unknown";
     }
 
@@ -1186,47 +1211,91 @@ public class AtCommandHelper : IDisposable
     }
 
     /// <summary>Set text mode — gọi trước khi ListUnreadSms.
-    /// 🔥 FIX: Dùng GSM charset để AT+CMGL="REC UNREAD" LUÔN hoạt động.
-    /// UCS2 charset gây lỗi: modem không hiểu filter ASCII → trả OK rỗng → fallback ALL → lặp tin.</summary>
+    /// 🔥 FIX v2: Dùng UCS2 charset để đọc đúng Unicode (tiếng Việt, Nhật, Trung).
+    /// Filter CMGL sẽ tự encode sang hex nếu modem cần.</summary>
     public void PrepareForRead()
     {
         try
         {
             SendAndRead("AT+CMGF=1", 500);
-            // 🔥 DÙNG GSM — KHÔNG dùng UCS2 ở đây!
-            // Lý do: Khi CSCS=UCS2, nhiều modem yêu cầu filter string cũng phải UCS2
-            // → AT+CMGL="REC UNREAD" trả OK rỗng → fallback ALL → đọc tin cũ → lặp tin
-            // Content sẽ được decode bằng DecodeUcs2IfNeeded() sau khi parse
-            SendAndRead("AT+CSCS=\"GSM\"", 500);
+            // 🔥 FIX: Dùng UCS2 để content trả về là hex string → DecodeUcs2IfNeeded decode đúng
+            // Trước đây dùng GSM → tiếng Việt/Nhật bị garbled
+            var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 1000);
+            if (!cscsResp.Contains("OK"))
+            {
+                // Fallback: modem không hỗ trợ UCS2 listing → dùng GSM
+                SendAndRead("AT+CSCS=\"GSM\"", 500);
+                _readCharsetUcs2 = false;
+            }
+            else
+            {
+                _readCharsetUcs2 = true;
+            }
         }
-        catch { }
+        catch { _readCharsetUcs2 = false; }
     }
 
+    // 🔥 Track charset để ListUnreadSms biết cần encode filter hay không
+    private bool _readCharsetUcs2;
+
     /// <summary>Đọc SMS UNREAD only.
-    /// 🔥 FIX: KHÔNG BAO GIỜ dùng "ALL" — đó là nguyên nhân gây lặp tin.
-    /// Chỉ dùng "REC UNREAD" (+ fallback integer 0). Nếu không có tin mới → trả rỗng.</summary>
+    /// 🔥 FIX: Khi charset=UCS2, filter phải encode sang UCS2 hex.
+    /// KHÔNG BAO GIỜ dùng "ALL" — đó là nguyên nhân gây lặp tin.</summary>
     public List<(int index, string sender, string content, DateTime time)> ListUnreadSms(int timeoutMs = 5000)
     {
         var messages = new List<(int, string, string, DateTime)>();
         try
         {
-            // Step 1: "REC UNREAD" — hoạt động tốt khi CSCS=GSM
-            var resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
-            bool gotError = resp.Contains("ERROR");
-            bool hasData = resp.Contains("+CMGL");
-            System.Diagnostics.Debug.WriteLine(
-                $"📬 ListUnreadSms [REC UNREAD]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
+            string resp;
+            bool hasData;
 
-            // Step 2: Integer 0 = "REC UNREAD" (fallback cho modem cũ)
-            if (gotError && !hasData)
+            if (_readCharsetUcs2)
             {
-                resp = SendAndRead("AT+CMGL=0", timeoutMs);
+                // 🔥 Khi CSCS=UCS2, modem yêu cầu filter string CŨNG phải UCS2 hex
+                // "REC UNREAD" → UCS2 hex: 00520045004300200055004E005200450041004400
+                string filterHex = EncodeUcs2("REC UNREAD");
+                resp = SendAndRead($"AT+CMGL=\"{filterHex}\"", timeoutMs);
+                bool gotError = resp.Contains("ERROR");
+                hasData = resp.Contains("+CMGL");
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"📬 ListUnreadSms [UCS2 filter]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
+
+                // Fallback 1: thử integer 0 = "REC UNREAD"
+                if (!hasData)
+                {
+                    resp = SendAndRead("AT+CMGL=0", timeoutMs);
+                    hasData = resp.Contains("+CMGL");
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 ListUnreadSms [UCS2 int 0]: {(hasData ? "HAS DATA" : "EMPTY")}");
+                }
+
+                // Fallback 2: nếu UCS2 filter fail → chuyển sang GSM rồi thử lại
+                if (!hasData && gotError)
+                {
+                    SendAndRead("AT+CSCS=\"GSM\"", 500);
+                    resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
+                    hasData = resp.Contains("+CMGL");
+                    _readCharsetUcs2 = false; // Nhớ cho lần sau
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 ListUnreadSms [GSM fallback]: {(hasData ? "HAS DATA" : "EMPTY")}");
+                }
+            }
+            else
+            {
+                // GSM charset — filter string ASCII bình thường
+                resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
+                bool gotError = resp.Contains("ERROR");
                 hasData = resp.Contains("+CMGL");
                 System.Diagnostics.Debug.WriteLine(
-                    $"📬 ListUnreadSms [0]: {(hasData ? "HAS DATA" : "EMPTY")}");
-            }
+                    $"📬 ListUnreadSms [GSM]: {(hasData ? "HAS DATA" : gotError ? "ERROR" : "EMPTY")}");
 
-            // 🔥 KHÔNG CÓ FALLBACK "ALL" — "ALL" đọc cả tin đã đọc → GÂY LẶP TIN!
+                if (gotError && !hasData)
+                {
+                    resp = SendAndRead("AT+CMGL=0", timeoutMs);
+                    hasData = resp.Contains("+CMGL");
+                }
+            }
 
             ParseCmglResponse(resp, messages);
             System.Diagnostics.Debug.WriteLine(
@@ -1371,6 +1440,12 @@ public class AtCommandHelper : IDisposable
         // 81xxx (Nhật, thiếu +) → +81xxx
         else if (phone.StartsWith("81") && !phone.StartsWith("+") && phone.Length >= 11)
             phone = "+" + phone;
+        // 🔥 Số Nhật format nội địa: 0X0-XXXX-XXXX (11 chữ số, bắt đầu 0)
+        // 070, 080, 090 = di động | 050 = IP phone
+        // Chuyển: 07084070642 → +817084070642
+        else if (phone.StartsWith("0") && !phone.StartsWith("+") && phone.Length == 11
+                 && (phone.StartsWith("070") || phone.StartsWith("080") || phone.StartsWith("090") || phone.StartsWith("050")))
+            phone = "+81" + phone.Substring(1);
         // Số local VN (09xxx, 01xxx): giữ nguyên vì modem tự hiểu
         // Số international (+84xxx, +81xxx): giữ nguyên
         return phone;
@@ -1700,6 +1775,205 @@ public class AtCommandHelper : IDisposable
         return SendAndRead("AT+QFLST", 3000);
     }
 
+    // ═══════════════ SIM DIAGNOSTICS ═══════════════
+
+    /// <summary>
+    /// Kiểm tra SIM có được nhận không — AT+CPIN?
+    /// Trả về: "READY" | "SIM PIN" | "SIM PUK" | "NOT INSERTED" | "NOT READY" | null (lỗi)
+    /// </summary>
+    public string? CheckSimPresence()
+    {
+        try
+        {
+            var resp = SendAndRead("AT+CPIN?", 3000);
+
+            if (resp.Contains("+CPIN: READY")) return "READY";
+            if (resp.Contains("+CPIN: SIM PIN")) return "SIM PIN";
+            if (resp.Contains("+CPIN: SIM PUK")) return "SIM PUK";
+            if (resp.Contains("+CPIN: SIM PIN2")) return "SIM PIN2";
+            if (resp.Contains("+CPIN: SIM PUK2")) return "SIM PUK2";
+            if (resp.Contains("+CPIN: PH-NET PIN")) return "PH-NET PIN"; // SIM bị khóa mạng
+            if (resp.Contains("NOT INSERTED") || resp.Contains("not inserted"))
+                return "NOT INSERTED";
+            if (resp.Contains("NOT READY") || resp.Contains("not ready"))
+                return "NOT READY";
+
+            // CME ERROR codes
+            if (resp.Contains("+CME ERROR: 10")) return "NOT INSERTED"; // SIM not inserted
+            if (resp.Contains("+CME ERROR: 13")) return "SIM FAILURE";  // SIM failure
+            if (resp.Contains("+CME ERROR: 14")) return "SIM BUSY";     // SIM busy
+            if (resp.Contains("+CME ERROR: 15")) return "SIM WRONG";    // SIM wrong
+            if (resp.Contains("+CME ERROR: 17")) return "SIM PIN2";     // SIM PIN2 required
+            if (resp.Contains("+CME ERROR: 18")) return "SIM PUK2";     // SIM PUK2 required
+            if (resp.Contains("ERROR")) return "ERROR";
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ CheckSimPresence error: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Kiểm tra đăng ký mạng — AT+CREG?
+    /// Returns: (status, lac, ci)
+    ///   status: 0=not registered, 1=home, 2=searching, 3=denied, 4=unknown, 5=roaming
+    /// </summary>
+    public (int status, string? lac, string? ci) CheckNetworkRegistration()
+    {
+        try
+        {
+            // Enable extended format first
+            SendAndRead("AT+CREG=2", 500);
+            Thread.Sleep(200);
+
+            var resp = SendAndRead("AT+CREG?", 2000);
+
+            // +CREG: 2,1,"1ABF","0123456F",7
+            // +CREG: 0,1
+            var m = Regex.Match(resp, @"\+CREG:\s*\d+,\s*(\d+)(?:,\s*""([^""]*)"",\s*""([^""]*)"")?");
+            if (m.Success)
+            {
+                int stat = int.Parse(m.Groups[1].Value);
+                string? lac = m.Groups[2].Success ? m.Groups[2].Value : null;
+                string? ci = m.Groups[3].Success ? m.Groups[3].Value : null;
+                return (stat, lac, ci);
+            }
+
+            // Simplified format
+            m = Regex.Match(resp, @"\+CREG:\s*(\d+)");
+            if (m.Success)
+                return (int.Parse(m.Groups[1].Value), null, null);
+
+            return (-1, null, null);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"⚠️ CheckNetworkRegistration error: {ex.Message}");
+            return (-1, null, null);
+        }
+    }
+
+    /// <summary>
+    /// Chẩn đoán SIM toàn diện — trả về kết quả chi tiết.
+    /// Được gọi trong ScanOnePort để phân loại: COM hỏng / không nhận SIM / SIM hỏng / SIM OK.
+    /// </summary>
+    public SimDiagnosticResult DiagnoseSimCard()
+    {
+        var result = new SimDiagnosticResult();
+
+        // ── Bước 1: Modem có sống không? (AT)
+        result.ModemAlive = IsAlive();
+        if (!result.ModemAlive)
+        {
+            result.Category = DiagnosticCategory.ComPortBroken;
+            result.Detail = "Modem không phản hồi AT command";
+            return result;
+        }
+
+        // ── Bước 2: SIM có được cắm vào không? (AT+CPIN?)
+        result.SimPinStatus = CheckSimPresence();
+
+        if (result.SimPinStatus == null || result.SimPinStatus == "ERROR")
+        {
+            result.Category = DiagnosticCategory.ComPortNoSim;
+            result.Detail = "Không thể kiểm tra SIM — modem có thể không hỗ trợ hoặc cổng bị lỗi";
+            return result;
+        }
+
+        if (result.SimPinStatus == "NOT INSERTED")
+        {
+            result.Category = DiagnosticCategory.ComPortNoSim;
+            result.Detail = "Không có SIM trong slot — cắm SIM và thử lại";
+            return result;
+        }
+
+        if (result.SimPinStatus == "SIM FAILURE" || result.SimPinStatus == "SIM WRONG")
+        {
+            result.Category = DiagnosticCategory.SimBroken;
+            result.Detail = $"SIM bị hỏng hoặc không tương thích ({result.SimPinStatus})";
+            return result;
+        }
+
+        if (result.SimPinStatus == "SIM PIN")
+        {
+            result.Category = DiagnosticCategory.SimNeedPin;
+            result.Detail = "SIM yêu cầu mã PIN — cần nhập PIN để sử dụng";
+            return result;
+        }
+
+        if (result.SimPinStatus == "SIM PUK" || result.SimPinStatus == "SIM PUK2")
+        {
+            result.Category = DiagnosticCategory.SimLocked;
+            result.Detail = $"SIM bị khóa ({result.SimPinStatus}) — cần mã PUK để mở khóa";
+            return result;
+        }
+
+        if (result.SimPinStatus == "PH-NET PIN")
+        {
+            result.Category = DiagnosticCategory.SimLocked;
+            result.Detail = "SIM bị khóa mạng (Network Lock) — không thể dùng với modem này";
+            return result;
+        }
+
+        if (result.SimPinStatus == "SIM BUSY")
+        {
+            result.Category = DiagnosticCategory.SimBusy;
+            result.Detail = "SIM đang bận (SIM BUSY) — thử lại sau";
+            return result;
+        }
+
+        if (result.SimPinStatus == "NOT READY")
+        {
+            result.Category = DiagnosticCategory.SimNotReady;
+            result.Detail = "SIM chưa sẵn sàng — đang khởi tạo, thử lại sau vài giây";
+            return result;
+        }
+
+        // ── Bước 3: SIM READY → kiểm tra đăng ký mạng (AT+CREG?)
+        result.SimPresent = true;
+        var (regStatus, lac, ci) = CheckNetworkRegistration();
+        result.NetworkStatus = regStatus;
+        result.Lac = lac;
+        result.CellId = ci;
+
+        switch (regStatus)
+        {
+            case 0:
+                result.Category = DiagnosticCategory.SimNoNetwork;
+                result.Detail = "SIM không đăng ký được mạng — có thể SIM hết hạn, vùng phủ sóng kém, hoặc SIM bị khóa";
+                break;
+            case 1:
+                result.Category = DiagnosticCategory.SimOk;
+                result.Detail = "SIM OK — đăng ký mạng thành công (Home)";
+                break;
+            case 2:
+                result.Category = DiagnosticCategory.SimSearching;
+                result.Detail = "SIM đang tìm mạng — chờ vài giây (vùng phủ sóng yếu?)";
+                break;
+            case 3:
+                result.Category = DiagnosticCategory.SimDenied;
+                result.Detail = "SIM bị từ chối đăng ký mạng — SIM có thể bị khóa hoặc hết hạn";
+                break;
+            case 4:
+                result.Category = DiagnosticCategory.SimUnknown;
+                result.Detail = "Trạng thái mạng không xác định";
+                break;
+            case 5:
+                result.Category = DiagnosticCategory.SimOk;
+                result.Detail = "SIM OK — đăng ký mạng thành công (Roaming)";
+                break;
+            default:
+                result.Category = DiagnosticCategory.SimUnknown;
+                result.Detail = $"Không thể kiểm tra đăng ký mạng (status={regStatus})";
+                break;
+        }
+
+        return result;
+    }
+
     public void Dispose()
     {
         if (!_disposed)
@@ -1709,4 +1983,48 @@ public class AtCommandHelper : IDisposable
             _disposed = true;
         }
     }
+}
+
+/// <summary>Kết quả chẩn đoán SIM chi tiết.</summary>
+public class SimDiagnosticResult
+{
+    public DiagnosticCategory Category { get; set; } = DiagnosticCategory.Unknown;
+    public string Detail { get; set; } = "";
+    public bool ModemAlive { get; set; }
+    public bool SimPresent { get; set; }
+    public string? SimPinStatus { get; set; }
+    public int NetworkStatus { get; set; } = -1;
+    public string? Lac { get; set; }
+    public string? CellId { get; set; }
+}
+
+/// <summary>Phân loại chẩn đoán SIM.</summary>
+public enum DiagnosticCategory
+{
+    /// <summary>Chưa kiểm tra</summary>
+    Unknown,
+    /// <summary>Cổng COM hỏng — modem không phản hồi</summary>
+    ComPortBroken,
+    /// <summary>Cổng COM mở được nhưng không có SIM</summary>
+    ComPortNoSim,
+    /// <summary>SIM bị hỏng vật lý hoặc không tương thích</summary>
+    SimBroken,
+    /// <summary>SIM yêu cầu mã PIN</summary>
+    SimNeedPin,
+    /// <summary>SIM bị khóa PUK hoặc Network Lock</summary>
+    SimLocked,
+    /// <summary>SIM đang bận (thử lại sau)</summary>
+    SimBusy,
+    /// <summary>SIM chưa sẵn sàng (đang khởi tạo)</summary>
+    SimNotReady,
+    /// <summary>SIM OK nhưng không đăng ký được mạng</summary>
+    SimNoNetwork,
+    /// <summary>SIM đang tìm mạng</summary>
+    SimSearching,
+    /// <summary>SIM bị từ chối đăng ký mạng</summary>
+    SimDenied,
+    /// <summary>Trạng thái không xác định</summary>
+    SimUnknown,
+    /// <summary>SIM hoạt động bình thường</summary>
+    SimOk,
 }
