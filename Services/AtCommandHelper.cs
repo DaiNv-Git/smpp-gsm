@@ -833,9 +833,7 @@ public class AtCommandHelper : IDisposable
                 // 🔥 FIX: Tăng timeout 200→500ms và reset cache về null để lần gửi sau
                 // luôn gửi lại AT+CSCS + AT+CSMP đầy đủ (tránh cache sai).
                 try { SendAndRead("AT+CSCS=\"UCS2\"", 500); } catch { }
-                _lastCharset = null; // 🔥 Reset cache — modem sẽ nhận AT+CSCS đúng ở lần sau
-                // 🔥 FIX: Reset SMSC cache để re-check nếu nhà mạng đổi SMSC
-                _smscConfigured = false;
+                _lastCharset = null; 
             }
         }
     }
@@ -1309,13 +1307,26 @@ public class AtCommandHelper : IDisposable
                 {
                     resp = SendAndRead("AT+CMGL=0", timeoutMs);
                     hasData = resp.Contains("+CMGL");
+                    if (!resp.Contains("ERROR")) gotError = false; 
+                    
                     System.Diagnostics.Debug.WriteLine(
                         $"📬 ListUnreadSms [UCS2 int 0]: {(hasData ? "HAS DATA" : "EMPTY")}");
                 }
 
-                // Fallback 2: nếu UCS2 filter fail → chuyển sang GSM rồi thử lại
+                // Fallback 1.5: vài modem ở mode UCS2 nhưng vẫn yêu cầu chuỗi string ASCII cho filter thay vì chuỗi Hex
                 if (!hasData && gotError)
                 {
+                    resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
+                    hasData = resp.Contains("+CMGL");
+                    if (!resp.Contains("ERROR")) gotError = false;
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 ListUnreadSms [UCS2 ASCII string]: {(hasData ? "HAS DATA" : "EMPTY")}");
+                }
+
+                // Fallback 2: nếu UCS2 filter fail TUYỆT ĐỐI → chuyển sang GSM rồi thử lại
+                if (!hasData && gotError)
+                {
+                    // Lỗi thực sự do modem không hỗ trợ List SMS ở mode UCS2
                     SendAndRead("AT+CSCS=\"GSM\"", 500);
                     resp = SendAndRead("AT+CMGL=\"REC UNREAD\"", timeoutMs);
                     hasData = resp.Contains("+CMGL");
@@ -1634,6 +1645,9 @@ public class AtCommandHelper : IDisposable
         // Xóa byte xuống dòng để regex Hex khớp đúng cho SMS chia nhiều dòng
         string cleanHex = text.Replace("\n", "").Replace("\r", "").Replace(" ", "");
 
+        // Lọc rác UDH (User Data Header) của SMS ghép nhiều phần
+        cleanHex = StripUdhiFromHex(cleanHex);
+
         // Check if UCS2 encoded (hex string, length divisible by 4)
         if (Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$") && cleanHex.Length % 4 == 0 && cleanHex.Length >= 4)
         {
@@ -1688,6 +1702,8 @@ public class AtCommandHelper : IDisposable
 
         if (cleanHex.Length == 0) return RecoverRawUtf8FromLatin1(text);
         if (!Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$")) return RecoverRawUtf8FromLatin1(text); // Không phải hex
+        
+        cleanHex = StripUdhiFromHex(cleanHex);
 
         try
         {
@@ -1723,6 +1739,36 @@ public class AtCommandHelper : IDisposable
     }
 
     // ==================== VOICE CALL ====================
+
+    /// <summary>
+    /// 🔥 Loại bỏ User Data Header (UDH) dành cho Concatenated SMS (tin nhắn ghép) để tránh bị decode nhầm thành chữ dị thường.
+    /// UDH dài 6 bytes (12 char hex) kiểu "050003..." hoặc 7 bytes kiểu "060804...".
+    /// Cắt nó đi thì Decode UCS2 mới ra chính xác văn bản thuần.
+    /// </summary>
+    private static string StripUdhiFromHex(string cleanHex)
+    {
+        try
+        {
+            // 8-bit reference number: 05 00 03 [Ref] [Total] [Seq]
+            if (cleanHex.StartsWith("050003") && cleanHex.Length >= 12)
+            {
+                int total = Convert.ToInt32(cleanHex.Substring(8, 2), 16);
+                int seq = Convert.ToInt32(cleanHex.Substring(10, 2), 16);
+                if (total > 0 && seq > 0 && seq <= total)
+                    return cleanHex.Substring(12);
+            }
+            // 16-bit reference number: 06 08 04 [RefHi] [RefLo] [Total] [Seq]
+            else if (cleanHex.StartsWith("060804") && cleanHex.Length >= 14)
+            {
+                int total = Convert.ToInt32(cleanHex.Substring(10, 2), 16);
+                int seq = Convert.ToInt32(cleanHex.Substring(12, 2), 16);
+                if (total > 0 && seq > 0 && seq <= total)
+                    return cleanHex.Substring(14);
+            }
+        }
+        catch { }
+        return cleanHex;
+    }
 
     /// <summary>
     /// Khởi tạo chế độ voice call: bật CLIP, CLCC URC, ATE0.

@@ -94,10 +94,7 @@ public partial class MainViewModel : ObservableObject
                 var existing = SimList.FirstOrDefault(s => s.ComPort == sim.ComPort);
                 if (existing != null)
                 {
-                    bool wasSelected = (SelectedSim?.ComPort == sim.ComPort);
-                    var idx = SimList.IndexOf(existing);
-                    SimList[idx] = sim;
-                    if (wasSelected) SelectedSim = sim;
+                    existing.UpdateFrom(sim);
                 }
                 else
                 {
@@ -123,10 +120,7 @@ public partial class MainViewModel : ObservableObject
                 var existing = SimList.FirstOrDefault(s => s.ComPort == sim.ComPort);
                 if (existing != null)
                 {
-                    bool wasSelected = (SelectedSim?.ComPort == sim.ComPort);
-                    var idx = SimList.IndexOf(existing);
-                    SimList[idx] = sim;
-                    if (wasSelected) SelectedSim = sim;
+                    existing.UpdateFrom(sim);
                 }
                 UpdateStats();
             });
@@ -150,10 +144,7 @@ public partial class MainViewModel : ObservableObject
                     var existing = SimList.FirstOrDefault(s => s.ComPort == sim.ComPort);
                     if (existing != null)
                     {
-                        bool wasSelected = (SelectedSim?.ComPort == sim.ComPort);
-                        var idx = SimList.IndexOf(existing);
-                        SimList[idx] = sim;
-                        if (wasSelected) SelectedSim = sim;
+                        existing.UpdateFrom(sim);
                     }
                 }
 

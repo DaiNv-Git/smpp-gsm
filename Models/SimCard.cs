@@ -1,9 +1,11 @@
+using System;
 using System.Linq;
 using GsmAgent.Services;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace GsmAgent.Models;
 
-public class SimCard
+public partial class SimCard : ObservableObject
 {
     public string ComPort { get; set; } = "";
     public string? PhoneNumber { get; set; }
@@ -182,6 +184,36 @@ public class SimCard
             BlockedUntil = DateTime.Now.AddMinutes(5);
             ConsecutiveFails = 0;
         }
+    }
+
+    /// <summary>
+    /// Copy toàn bộ state từ 1 sim khác sang, đồng thời báo cho WPF vẽ lại giao diện.
+    /// Giúp tránh lỗi làm mất SelectedItem khi thay thế nguyên Object trong ObservableCollection.
+    /// </summary>
+    public void UpdateFrom(SimCard other)
+    {
+        PhoneNumber = other.PhoneNumber;
+        Ccid = other.Ccid;
+        Imsi = other.Imsi;
+        Provider = other.Provider;
+        SignalLevel = other.SignalLevel;
+        Status = other.Status;
+        QueueSize = other.QueueSize;
+        ErrorMessage = other.ErrorMessage;
+        Diagnostic = other.Diagnostic;
+        DiagnosticDetail = other.DiagnosticDetail;
+        SimPinStatus = other.SimPinStatus;
+        NetworkRegStatus = other.NetworkRegStatus;
+        TotalSent = other.TotalSent;
+        TotalFailed = other.TotalFailed;
+        LastActiveAt = other.LastActiveAt;
+        DailySentCount = other.DailySentCount;
+        DailyResetDate = other.DailyResetDate;
+        ConsecutiveFails = other.ConsecutiveFails;
+        BlockedUntil = other.BlockedUntil;
+        
+        // Kích hoạt signal để WPF re-bind (cập nhật giao diện toàn bộ property)
+        OnPropertyChanged(string.Empty);
     }
 }
 
