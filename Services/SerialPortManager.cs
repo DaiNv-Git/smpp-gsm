@@ -120,6 +120,16 @@ public class SerialPortManager : IDisposable
                         {
                             failedPorts.Add(port);
                             System.Diagnostics.Debug.WriteLine($"❌ {port}: scan thất bại sau 2 lần");
+
+                            // 🔥 Emit failed port as error SIM → hiển thị đỏ trên UI
+                            var errorSim = new SimCard
+                            {
+                                ComPort = port,
+                                Status = SimStatus.Error,
+                                ErrorMessage = "Không phản hồi AT — modem hỏng hoặc không có SIM",
+                            };
+                            newSims.Add(errorSim);
+                            SimScanned?.Invoke(errorSim);
                         }
                     }
                 }
@@ -139,11 +149,12 @@ public class SerialPortManager : IDisposable
             // 📊 Scan statistics
             int totalPorts = portNames.Length;
             int totalOk = pass1Ok + retryOk;
-            int totalFail = totalPorts - totalOk;
+            int totalFail = failedPorts.Count;
             int phoneFound = newSims.Count(s => !string.IsNullOrWhiteSpace(s.PhoneNumber));
+            int phoneMissing = newSims.Count(s => s.IsMissingPhone);
 
             sw.Stop();
-            LastScanStats = $"📊 {totalPorts} cổng COM | ✅ {totalOk} thành công | ❌ {totalFail} thất bại | 📱 {phoneFound} có số ĐT | ⏱️ {sw.Elapsed.TotalSeconds:F1}s";
+            LastScanStats = $"📊 {totalPorts} cổng COM | ✅ {totalOk} OK | ❌ {totalFail} hỏng | 📱 {phoneFound} có SĐT | ⚠️ {phoneMissing} thiếu SĐT | ⏱️ {sw.Elapsed.TotalSeconds:F1}s";
             System.Diagnostics.Debug.WriteLine(
                 $"✅ Scan hoàn tất: {LastScanStats} (pass1={pass1Ok}, retry={retryOk})");
 

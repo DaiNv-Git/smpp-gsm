@@ -155,7 +155,7 @@
 
         <!-- ═══════════════ STATS CARDS ═══════════════ -->
         <Border Grid.Row="1" Padding="12,10" Background="{StaticResource BgPrimaryBrush}">
-            <UniformGrid Columns="5" Rows="1">
+            <UniformGrid Columns="6" Rows="1">
                 <!-- SIMs Online -->
                 <Border CornerRadius="8" Margin="3" Padding="10,8"
                     BorderThickness="1" BorderBrush="#1a3fb950"
@@ -216,6 +216,19 @@
                         <TextBlock Text="{Binding RateLimitedCount}" FontSize="22" FontWeight="Bold"
                             Foreground="{StaticResource AccentRedBrush}" HorizontalAlignment="Center"/>
                         <TextBlock Text="Bị giới hạn" FontSize="9"
+                            Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
+                            Margin="0,-2,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Error Ports -->
+                <Border CornerRadius="8" Margin="3" Padding="10,8"
+                    BorderThickness="1" BorderBrush="#1aff6b6b"
+                    Background="#0dff6b6b">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding ErrorPortCount}" FontSize="22" FontWeight="Bold"
+                            Foreground="#ff6b6b" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Cổng hỏng" FontSize="9"
                             Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
                             Margin="0,-2,0,0"/>
                     </StackPanel>
@@ -360,6 +373,16 @@
                                     <Setter Property="Margin" Value="0"/>
                                     <Setter Property="Padding" Value="0"/>
                                     <Style.Triggers>
+                                        <!-- 🔴 Hỏng = đỏ đậm (COM port chết, modem không phản hồi) -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Hỏng">
+                                            <Setter Property="Background" Value="#30f85149"/>
+                                            <Setter Property="Foreground" Value="#ff8a80"/>
+                                        </DataTrigger>
+                                        <!-- 🟡 Thiếu số điện thoại = vàng -->
+                                        <DataTrigger Binding="{Binding StatusText}" Value="Thiếu SĐT">
+                                            <Setter Property="Background" Value="#22e3b341"/>
+                                            <Setter Property="Foreground" Value="#ffe0a0"/>
+                                        </DataTrigger>
                                         <!-- 🟢 Online = xanh lá -->
                                         <DataTrigger Binding="{Binding StatusText}" Value="Hoạt động">
                                             <Setter Property="Background" Value="#1a3fb950"/>
@@ -377,10 +400,6 @@
                                         <!-- ⛔ Giới hạn = đỏ nhạt -->
                                         <DataTrigger Binding="{Binding StatusText}" Value="Giới hạn">
                                             <Setter Property="Background" Value="#12f85149"/>
-                                        </DataTrigger>
-                                        <!-- Lỗi = đỏ -->
-                                        <DataTrigger Binding="{Binding StatusText}" Value="Lỗi">
-                                            <Setter Property="Background" Value="#18f85149"/>
                                         </DataTrigger>
                                         <!-- Hover -->
                                         <Trigger Property="IsMouseOver" Value="True">
@@ -451,6 +470,15 @@
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
                                 <DataGridTextColumn Header="Hàng đợi" Binding="{Binding QueueSize}" Width="60"/>
+                                <DataGridTextColumn Header="Ghi chú" Binding="{Binding ErrorMessage}" Width="*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                            <Setter Property="FontSize" Value="10"/>
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
                             </DataGrid.Columns>
                         </DataGrid>
                     </Border>

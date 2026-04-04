@@ -12,6 +12,9 @@ public class SimCard
     public int SignalLevel { get; set; } = -1;
     public SimStatus Status { get; set; } = SimStatus.Offline;
     public int QueueSize { get; set; }
+
+    /// <summary>Thông tin lỗi khi scan (COM port hỏng, modem không phản hồi, v.v.)</summary>
+    public string? ErrorMessage { get; set; }
     public int TotalSent { get; set; }
     public int TotalFailed { get; set; }
     public DateTime? LastActiveAt { get; set; }
@@ -42,6 +45,9 @@ public class SimCard
 
     public bool IsAvailable => Status == SimStatus.Online && !IsBlocked && !IsRateLimited;
 
+    /// <summary>SIM đã scan nhưng không đọc được số điện thoại.</summary>
+    public bool IsMissingPhone => Status != SimStatus.Error && string.IsNullOrWhiteSpace(PhoneNumber) && !string.IsNullOrWhiteSpace(Ccid);
+
     public double SuccessRate => TotalSent + TotalFailed > 0
         ? (double)TotalSent / (TotalSent + TotalFailed) * 100
         : 0;
@@ -60,12 +66,13 @@ public class SimCard
     /// <summary>Trạng thái text thuần (không emoji) — cho bảng kiểu Dangs Modem.</summary>
     public string StatusText => this switch
     {
+        { Status: SimStatus.Error } => "Hỏng",
+        { IsMissingPhone: true, Status: SimStatus.Online } => "Thiếu SĐT",
         { IsBlocked: true } => "Bị chặn",
         { IsRateLimited: true } => "Giới hạn",
         { Status: SimStatus.Online } => "Hoạt động",
         { Status: SimStatus.Busy } => "Đang gửi",
         { Status: SimStatus.Offline } => "Chưa kết nối",
-        { Status: SimStatus.Error } => "Lỗi",
         _ => "Ổn định"
     };
 

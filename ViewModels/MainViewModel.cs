@@ -28,6 +28,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _rateLimitedCount;
     [ObservableProperty] private int _missingPhoneCount;
     [ObservableProperty] private string _scanStatus = "";
+    [ObservableProperty] private int _errorPortCount;
     [ObservableProperty] private string _statusMessage = "Sẵn sàng";
     [ObservableProperty] private AppSettings _settings;
     [ObservableProperty] private string _selectedFilter = "ALL";
@@ -560,7 +561,9 @@ public partial class MainViewModel : ObservableObject
             m.Direction == "OUT" && (m.Status == "SENT" || m.Status == "DELIVERED"));
         RateLimitedCount = SimList.Count(s => s.IsRateLimited);
         // 🔥 FIX: Đếm TẤT CẢ SIM thiếu số điện thoại (kể cả chưa kết nối worker)
-        MissingPhoneCount = SimList.Count(s => string.IsNullOrWhiteSpace(s.PhoneNumber));
+        MissingPhoneCount = SimList.Count(s => s.IsMissingPhone);
+        // 🔥 Đếm COM port hỏng (scan thất bại)
+        ErrorPortCount = SimList.Count(s => s.Status == SimStatus.Error);
         UpdateMessageCounts();
     }
 
