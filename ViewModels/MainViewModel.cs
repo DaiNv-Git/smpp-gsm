@@ -582,8 +582,25 @@ public partial class MainViewModel : ObservableObject
 
         // 🔥 Cập nhật danh sách SIM có số ĐT (cho dropdown gửi SMS / gọi điện)
         var withPhone = SimList.Where(s => !string.IsNullOrWhiteSpace(s.PhoneNumber) && s.Status != SimStatus.Error).ToList();
-        SimsWithPhone.Clear();
-        foreach (var s in withPhone) SimsWithPhone.Add(s);
+        
+        // 🔥 FIX: Không dùng SimsWithPhone.Clear() vì nó sẽ báo WPF reset SelectedItem = null của ComboBox.
+        // Chỉ xóa SIM nào không còn trong danh sách hợp lệ
+        for (int i = SimsWithPhone.Count - 1; i >= 0; i--)
+        {
+            if (!withPhone.Contains(SimsWithPhone[i]))
+            {
+                SimsWithPhone.RemoveAt(i);
+            }
+        }
+        
+        // Thêm SIM mới vào nếu chưa có
+        foreach (var s in withPhone)
+        {
+            if (!SimsWithPhone.Contains(s))
+            {
+                SimsWithPhone.Add(s);
+            }
+        }
 
         UpdateMessageCounts();
     }
