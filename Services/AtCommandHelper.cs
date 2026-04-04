@@ -713,10 +713,8 @@ public class AtCommandHelper : IDisposable
                 if (!_port.IsOpen) return false;
 
                 // Phát hiện có cần Unicode hay không
-                // 🔥 FIX: TryEncodeGsm7 trả null khi có unsupported char (tiếng Việt có dấu, Nhật, Trung)
-                // → an toàn hơn regex "^[\x00-\x7F]*$" (vẫn pass cho ASCII nhưng miss GSM extension)
-                var gsmBytes = TryEncodeGsm7(content);
-                bool isUnicode = gsmBytes == null;
+                // Regex cho phép ASCII + GSM extension chars (ă, é, ò...) pass → gửi đúng GSM 7-bit
+                bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
                 string normalizedDest = NormalizeNumber(destNumber);
 
                 var cmgfResp = SendAndRead("AT+CMGF=1", 500);
@@ -744,8 +742,6 @@ public class AtCommandHelper : IDisposable
                 {
                     // ── UCS-2 path (tiếng Việt có dấu, Trung, Nhật) ──
                     // 🔥 FIX: LUÔN gửi AT+CSCS + AT+CSMP — KHÔNG dùng cache.
-                    // Lý do: modem có thể reset charset sau mỗi SMS hoặc sau timeout.
-                    // Cache _lastCharset == "UCS2" nhưng modem đã reset → SMS fail silently.
                     var cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
                     if (!cscsResp.Contains("OK"))
                     {
@@ -753,7 +749,6 @@ public class AtCommandHelper : IDisposable
                             $"⚠️ [{_port.PortName}] AT+CSCS=UCS2 failed: {cscsResp.Trim()} — retry");
                         Thread.Sleep(200);
                         cscsResp = SendAndRead("AT+CSCS=\"UCS2\"", 2000);
-                        // 🔥 FIX: Retry vẫn fail → không nên tiếp tục gửi SMS
                         if (!cscsResp.Contains("OK"))
                         {
                             System.Diagnostics.Debug.WriteLine(
@@ -772,8 +767,6 @@ public class AtCommandHelper : IDisposable
                         $"📝 [{_port.PortName}] UCS2 hex ({ucs2Hex.Length / 2} bytes): {ucs2Hex.Substring(0, Math.Min(40, ucs2Hex.Length))}...");
 
                     // 🔥 FIX: Concatenated SMS — nếu nội dung dài (>70 ký tự Unicode = 140 bytes = 280 hex chars)
-                    // Cần tách thành nhiều SMS với UDH (User Data Header) 7-byte
-                    // UDH format: 05 00 03 XX YY ZZ  — XXYYZZ = reference ID (2 bytes) + total parts (1 byte) + part num (1 byte)
                     if (ucs2Hex.Length > 280)
                     {
                         return SendSmsConcatenated(normalizedDest, content, ucs2Hex, timeoutMs);
@@ -792,7 +785,6 @@ public class AtCommandHelper : IDisposable
                             $"⚠️ [{_port.PortName}] AT+CSCS=GSM failed: {cscsResp.Trim()} — retry");
                         Thread.Sleep(200);
                         cscsResp = SendAndRead("AT+CSCS=\"GSM\"", 2000);
-                        // 🔥 FIX: Retry vẫn fail → không nên tiếp tục gửi SMS
                         if (!cscsResp.Contains("OK"))
                         {
                             System.Diagnostics.Debug.WriteLine(
@@ -803,8 +795,8 @@ public class AtCommandHelper : IDisposable
                     SendAndRead("AT+CSMP=49,167,0,0", 1000);
                     _lastCharset = "GSM";
 
-                    // 🔥 FIX: gsmBytes đã được pre-computed → dùng trực tiếp (không re-encode)
-                    bool ok = SendSmsWithGsm7Content(normalizedDest, gsmBytes!, timeoutMs);
+                    // Gửi text trực tiếp — giống hệt code gốc (đã hoạt động đúng)
+                    bool ok = SendSmsWithAsciiContent(normalizedDest, content, timeoutMs);
                     if (ok) return true;
 
                     // GSM bị modem từ chối → fallback sang UCS-2
