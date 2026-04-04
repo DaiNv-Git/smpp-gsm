@@ -992,11 +992,13 @@ public class AtCommandHelper : IDisposable
         }
         _port.DiscardInBuffer();
 
-        // 🔥 FIX: KHÔNG encode destination number sang UCS-2 hex.
-        // Hầu hết các modem và mạng Nhật (Softbank/Docomo) yêu cầu giữ nguyên ASCII (+81xxx)
-        // trong lệnh AT+CMGS ngay cả khi đang ở mode AT+CSCS="UCS2".
-        System.Diagnostics.Debug.WriteLine($"Sending AT+CMGS=\"{destNumber}\"");
-        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destNumber}\"\r");
+        // 🔥 FIX: Khi CSCS="UCS2", địa chỉ đầu cuối (đặt trong ngoặc kép) cần là chuỗi Hex UCS-2.
+        // Dấu '+' -> "002B", Số '8' -> "0038". Tránh lỗi "CMS ERROR 518: Invalid characters" do modems strict.
+        byte[] destBytes = Encoding.BigEndianUnicode.GetBytes(destNumber);
+        string destUcs2Hex = BitConverter.ToString(destBytes).Replace("-", "");
+
+        Logger.Info($"[{_port.PortName}] Sending AT+CMGS=\"{destUcs2Hex}\" (Original: {destNumber})");
+        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destUcs2Hex}\"\r");
         _port.BaseStream.Write(cmdBytes, 0, cmdBytes.Length);
 
         if (!WaitForPrompt(5000)) return false;
@@ -1030,7 +1032,7 @@ public class AtCommandHelper : IDisposable
                 if (resp.Contains(">")) return true;
                 if (resp.Contains("ERROR"))
                 {
-                    System.Diagnostics.Debug.WriteLine($"❌ SendSms: modem ERROR khi đợi prompt: {sb}");
+                    Logger.Error($"❌ [{_port.PortName}] SendSms: modem ERROR khi đợi prompt: {sb}");
                     // 🔥 FIX: Gửi ESCAPE TRƯỚC KHI return
                     try { _port.BaseStream.WriteByte(0x1B); } catch { }
                     return false;
@@ -1038,7 +1040,7 @@ public class AtCommandHelper : IDisposable
             }
             Thread.Sleep(50);
         }
-        System.Diagnostics.Debug.WriteLine($"❌ SendSms: No '>' prompt after {timeoutMs}ms (got: {sb})");
+        Logger.Error($"❌ [{_port.PortName}] SendSms: No '>' prompt after {timeoutMs}ms (got: {sb})");
         // 🔥 FIX: ESCAPE phải gửi TRƯỚC KHI return — không phải sau
         try { _port.BaseStream.WriteByte(0x1B); } catch { }
         Thread.Sleep(100);
