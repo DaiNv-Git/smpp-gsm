@@ -64,6 +64,7 @@ public partial class MainViewModel : ObservableObject
     private AtCommandHelper? _activeCallHelper;
 
     public ObservableCollection<SimCard> SimList { get; } = new();
+    public ObservableCollection<SimCard> SimsWithPhone { get; } = new();
     public ObservableCollection<SmsMessage> MessageList { get; } = new();
     public ObservableCollection<CallRecord> CallHistory { get; } = new();
     public ICollectionView FilteredMessages { get; private set; }
@@ -564,6 +565,12 @@ public partial class MainViewModel : ObservableObject
         MissingPhoneCount = SimList.Count(s => s.IsMissingPhone);
         // 🔥 Đếm COM port hỏng (scan thất bại)
         ErrorPortCount = SimList.Count(s => s.Status == SimStatus.Error);
+
+        // 🔥 Cập nhật danh sách SIM có số ĐT (cho dropdown gửi SMS / gọi điện)
+        var withPhone = SimList.Where(s => !string.IsNullOrWhiteSpace(s.PhoneNumber) && s.Status != SimStatus.Error).ToList();
+        SimsWithPhone.Clear();
+        foreach (var s in withPhone) SimsWithPhone.Add(s);
+
         UpdateMessageCounts();
     }
 

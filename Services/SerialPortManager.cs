@@ -91,10 +91,10 @@ public class SerialPortManager : IDisposable
                 await semaphore.WaitAsync();
                 try
                 {
-                    // ⏱️ Timeout wrapper: port bị hold/stuck sẽ bị bỏ qua sau 15s
                     var sim = await ScanOnePortWithTimeout(port, perPortTimeoutMs);
 
-                    if (sim != null)
+                    // Case 1: Scan OK (có CCID — có thể thiếu SĐT → hiện vàng)
+                    if (sim != null && sim.Status != SimStatus.Error)
                     {
                         newSims.Add(sim);
                         Interlocked.Increment(ref pass1Ok);
@@ -102,34 +102,52 @@ public class SerialPortManager : IDisposable
                         System.Diagnostics.Debug.WriteLine(
                             $"✅ {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"} Provider={sim.Provider}");
                     }
+                    // Case 2: Port mở được nhưng CCID fail → retry 1 lần
+                    else if (sim != null && sim.Status == SimStatus.Error)
+                    {
+                        await Task.Delay(300);
+                        var retry = await ScanOnePortWithTimeout(port, perPortTimeoutMs);
+
+                        if (retry != null && retry.Status != SimStatus.Error)
+                        {
+                            newSims.Add(retry);
+                            Interlocked.Increment(ref retryOk);
+                            SimScanned?.Invoke(retry);
+                        }
+                        else
+                        {
+                            // Retry vẫn Error → giữ kết quả error
+                            failedPorts.Add(port);
+                            var final = retry ?? sim;
+                            newSims.Add(final);
+                            SimScanned?.Invoke(final);
+                            System.Diagnostics.Debug.WriteLine($"❌ {port}: {final.ErrorMessage}");
+                        }
+                    }
+                    // Case 3: null = port không mở được (timeout/stuck)
                     else
                     {
-                        // Retry 1 lần cho port fail (cũng có timeout)
                         await Task.Delay(300);
                         sim = await ScanOnePortWithTimeout(port, perPortTimeoutMs);
 
-                        if (sim != null)
+                        if (sim != null && sim.Status != SimStatus.Error)
                         {
                             newSims.Add(sim);
                             Interlocked.Increment(ref retryOk);
                             SimScanned?.Invoke(sim);
-                            System.Diagnostics.Debug.WriteLine(
-                                $"✅ [RETRY] {port}: CCID={sim.Ccid?[..Math.Min(10, sim.Ccid.Length)]}... Phone={sim.PhoneNumber ?? "N/A"}");
                         }
                         else
                         {
                             failedPorts.Add(port);
-                            System.Diagnostics.Debug.WriteLine($"❌ {port}: scan thất bại sau 2 lần");
-
-                            // 🔥 Emit failed port as error SIM → hiển thị đỏ trên UI
-                            var errorSim = new SimCard
+                            var errorSim = sim ?? new SimCard
                             {
                                 ComPort = port,
                                 Status = SimStatus.Error,
-                                ErrorMessage = "Không phản hồi AT — modem hỏng hoặc không có SIM",
+                                ErrorMessage = "Không mở được COM port — timeout hoặc bị chiếm",
                             };
                             newSims.Add(errorSim);
                             SimScanned?.Invoke(errorSim);
+                            System.Diagnostics.Debug.WriteLine($"❌ {port}: không mở được sau 2 lần");
                         }
                     }
                 }
@@ -261,108 +279,158 @@ public class SerialPortManager : IDisposable
     private SimCard? ScanOnePort(string comPort)
     {
         using var helper = TryOpenPort(comPort, _settings.BaudRate);
-        if (helper == null) return null;
+        if (helper == null) return null; // Port thật sự không mở được
 
+        // 🔥 Thu thập từng bước — mỗi bước try-catch riêng, không mất data đã đọc
+        string? ccid = null;
+        string? imsi = null;
+        string? phone = null;
+        string? provider = null;
+        int signal = -1;
+        var errors = new List<string>();
+
+        // 1. CCID — nếu không đọc được CCID thì modem có thể không có SIM
         try
         {
-            // 1. CCID (required) — kiểm tra SIM có thật sự cắm không
-            var ccid = helper!.GetCcid();
-            if (string.IsNullOrWhiteSpace(ccid)) return null;
-
-            // 2. IMSI
-            var imsi = helper!.GetImsi();
-
-            // 3. Phone number — ⚡ Dùng DetectPhoneNumberFast (CNUM 1 lần + phonebook 1-5)
-            // USSD và extended retry sẽ chạy sau scan (Self-SMS Discovery)
-            var phone = helper!.DetectPhoneNumberFast();
-
-            // 🔒 Preserve existing phone number if scan failed to detect it
-            if (string.IsNullOrWhiteSpace(phone))
-            {
-                if (_sims.TryGetValue(comPort, out var existingSim) &&
-                    !string.IsNullOrWhiteSpace(existingSim.PhoneNumber))
-                {
-                    phone = existingSim.PhoneNumber;
-                    System.Diagnostics.Debug.WriteLine(
-                        $"📱 [{comPort}] Giữ số cũ từ cache: {phone} (CCID={ccid?.Substring(0, Math.Min(10, ccid.Length))})");
-                }
-            }
-
-            // 4. Fallback: query MongoDB trực tiếp (ưu tiên) hoặc BE API
-            string? provider = null;
-            if (string.IsNullOrWhiteSpace(phone))
-            {
-                // 4a. Try MongoDB trực tiếp (nhanh hơn, không cần server)
-                if (_mongoDb != null)
-                {
-                    try
-                    {
-                        var dbSim = _mongoDb.FindByCcidFuzzy(ccid);
-                        if (dbSim != null && !string.IsNullOrWhiteSpace(dbSim.PhoneNumber))
-                        {
-                            phone = dbSim.PhoneNumber;
-                            provider = dbSim.SimProvider;
-                            System.Diagnostics.Debug.WriteLine(
-                                $"📱 [{comPort}] Số từ MongoDB: {phone} (CCID fuzzy match)");
-
-                            // Ghi số vào SIM phonebook để lần sau AT command đọc được
-                            try { helper!.WritePhoneToSimPhonebook(phone); }
-                            catch { /* ignore */ }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"⚠️ [{comPort}] MongoDB lookup failed: {ex.Message}");
-                    }
-                }
-
-                // 4b. Fallback: query via BE API (nếu MongoDB không có)
-                if (string.IsNullOrWhiteSpace(phone))
-                {
-                    try
-                    {
-                        var lookup = LookupSimByCcid(ccid);
-                        if (lookup != null)
-                        {
-                            phone = lookup.Value.phone;
-                            provider = lookup.Value.provider;
-                            System.Diagnostics.Debug.WriteLine(
-                                $"📱 [{comPort}] Số từ API: {phone} (HTTP fallback)");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"⚠️ [{comPort}] API lookup failed: {ex.Message}");
-                    }
-                }
-            }
-
-            // 5. Signal level
-            var signal = helper!.GetSignalLevel();
-
-            // 6. Provider — IMSI prefix first, AT+COPS? là fallback
-            provider ??= AtCommandHelper.DetectProvider(imsi);
-            if (provider == "Unknown")
-                provider = helper!.QueryOperator() ?? "Unknown";
-
-            return new SimCard
-            {
-                ComPort = comPort,
-                Ccid = ccid,
-                Imsi = imsi,
-                PhoneNumber = phone,
-                Provider = provider,
-                SignalLevel = signal,
-                Status = SimStatus.Online,
-            };
+            ccid = helper!.GetCcid();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"❌ Scan {comPort}: {ex.Message}");
-            return null;
+            errors.Add($"CCID: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] GetCcid error: {ex.Message}");
         }
+
+        // Nếu không có CCID → vẫn trả SimCard với status Error (không return null)
+        if (string.IsNullOrWhiteSpace(ccid))
+        {
+            return new SimCard
+            {
+                ComPort = comPort,
+                Status = SimStatus.Error,
+                ErrorMessage = errors.Count > 0
+                    ? string.Join("; ", errors)
+                    : "Không đọc được CCID — có thể không có SIM",
+            };
+        }
+
+        // 2. IMSI
+        try
+        {
+            imsi = helper!.GetImsi();
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"IMSI: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] GetImsi error: {ex.Message}");
+        }
+
+        // 3. Phone number — ⚡ DetectPhoneNumberFast (CNUM + phonebook 1-5)
+        try
+        {
+            phone = helper!.DetectPhoneNumberFast();
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"Phone: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] DetectPhone error: {ex.Message}");
+        }
+
+        // 🔒 Preserve existing phone number if scan failed to detect it
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            if (_sims.TryGetValue(comPort, out var existingSim) &&
+                !string.IsNullOrWhiteSpace(existingSim.PhoneNumber))
+            {
+                phone = existingSim.PhoneNumber;
+                System.Diagnostics.Debug.WriteLine(
+                    $"📱 [{comPort}] Giữ số cũ từ cache: {phone} (CCID={ccid?.Substring(0, Math.Min(10, ccid.Length))})");
+            }
+        }
+
+        // 4. Fallback: query MongoDB / BE API
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            // 4a. Try MongoDB trực tiếp
+            if (_mongoDb != null)
+            {
+                try
+                {
+                    var dbSim = _mongoDb.FindByCcidFuzzy(ccid);
+                    if (dbSim != null && !string.IsNullOrWhiteSpace(dbSim.PhoneNumber))
+                    {
+                        phone = dbSim.PhoneNumber;
+                        provider = dbSim.SimProvider;
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📱 [{comPort}] Số từ MongoDB: {phone} (CCID fuzzy match)");
+
+                        try { helper!.WritePhoneToSimPhonebook(phone); }
+                        catch { /* ignore */ }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ [{comPort}] MongoDB lookup failed: {ex.Message}");
+                }
+            }
+
+            // 4b. Fallback: query via BE API
+            if (string.IsNullOrWhiteSpace(phone))
+            {
+                try
+                {
+                    var lookup = LookupSimByCcid(ccid);
+                    if (lookup != null)
+                    {
+                        phone = lookup.Value.phone;
+                        provider = lookup.Value.provider;
+                        System.Diagnostics.Debug.WriteLine(
+                            $"📱 [{comPort}] Số từ API: {phone} (HTTP fallback)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"⚠️ [{comPort}] API lookup failed: {ex.Message}");
+                }
+            }
+        }
+
+        // 5. Signal level
+        try
+        {
+            signal = helper!.GetSignalLevel();
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"Signal: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] GetSignal error: {ex.Message}");
+        }
+
+        // 6. Provider — IMSI prefix first, AT+COPS? là fallback
+        try
+        {
+            provider ??= AtCommandHelper.DetectProvider(imsi);
+            if (provider == "Unknown")
+                provider = helper!.QueryOperator() ?? "Unknown";
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"Provider: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"⚠️ [{comPort}] QueryOperator error: {ex.Message}");
+        }
+
+        return new SimCard
+        {
+            ComPort = comPort,
+            Ccid = ccid,
+            Imsi = imsi,
+            PhoneNumber = phone,
+            Provider = provider,
+            SignalLevel = signal,
+            Status = SimStatus.Online,
+            ErrorMessage = errors.Count > 0 ? string.Join("; ", errors) : null,
+        };
     }
 
     /// <summary>Tra MongoDB qua BE API: GET /api/dashboard/sim-lookup?ccid=xxx&fuzzy=true

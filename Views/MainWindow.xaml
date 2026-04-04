@@ -656,7 +656,7 @@
                             <!-- Chọn SIM -->
                             <TextBlock Text="Chọn SIM gửi" FontSize="11"
                                 Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,5"/>
-                            <ComboBox ItemsSource="{Binding SimList}"
+                            <ComboBox ItemsSource="{Binding SimsWithPhone}"
                                 SelectedItem="{Binding SelectedSim}"
                                 Background="{StaticResource BgCardBrush}"
                                 Foreground="{StaticResource TextPrimaryBrush}"
@@ -754,7 +754,7 @@
                                 <!-- Chọn SIM -->
                                 <TextBlock Text="Chọn SIM gọi" FontSize="11"
                                     Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                                <ComboBox ItemsSource="{Binding SimList}"
+                                <ComboBox ItemsSource="{Binding SimsWithPhone}"
                                     SelectedItem="{Binding SelectedCallSim}"
                                     Margin="0,0,0,10">
                                     <ComboBox.ItemTemplate>
