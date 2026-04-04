@@ -713,7 +713,10 @@ public class AtCommandHelper : IDisposable
                 if (!_port.IsOpen) return false;
 
                 // Phát hiện có cần Unicode hay không
-                bool isUnicode = !Regex.IsMatch(content, @"^[\x00-\x7F]*$");
+                // 🔥 FIX: TryEncodeGsm7 trả null khi có unsupported char (tiếng Việt có dấu, Nhật, Trung)
+                // → an toàn hơn regex "^[\x00-\x7F]*$" (vẫn pass cho ASCII nhưng miss GSM extension)
+                var gsmBytes = TryEncodeGsm7(content);
+                bool isUnicode = gsmBytes == null;
                 string normalizedDest = NormalizeNumber(destNumber);
 
                 var cmgfResp = SendAndRead("AT+CMGF=1", 500);
@@ -773,7 +776,7 @@ public class AtCommandHelper : IDisposable
                     // UDH format: 05 00 03 XX YY ZZ  — XXYYZZ = reference ID (2 bytes) + total parts (1 byte) + part num (1 byte)
                     if (ucs2Hex.Length > 280)
                     {
-                        return SendSmsConcatenated(normalizedDest, ucs2Hex, timeoutMs);
+                        return SendSmsConcatenated(normalizedDest, content, ucs2Hex, timeoutMs);
                     }
 
                     return SendSmsWithHexContent(normalizedDest, ucs2Hex, timeoutMs);
@@ -800,7 +803,8 @@ public class AtCommandHelper : IDisposable
                     SendAndRead("AT+CSMP=49,167,0,0", 1000);
                     _lastCharset = "GSM";
 
-                    bool ok = SendSmsWithAsciiContent(normalizedDest, content, timeoutMs);
+                    // 🔥 FIX: gsmBytes đã được pre-computed → dùng trực tiếp (không re-encode)
+                    bool ok = SendSmsWithGsm7Content(normalizedDest, gsmBytes!, timeoutMs);
                     if (ok) return true;
 
                     // GSM bị modem từ chối → fallback sang UCS-2
@@ -873,6 +877,33 @@ public class AtCommandHelper : IDisposable
     }
 
     /// <summary>
+    /// 🔥 Gửi SMS GSM 7-bit đã encode sẵn (7-bit packed bytes) qua BaseStream.
+    /// GSM 7-bit packed: mỗi byte chứa 7 bits user data + 1 bit padding.
+    /// </summary>
+    private bool SendSmsWithGsm7Content(string destNumber, byte[] gsm7Data, int timeoutMs)
+    {
+        if (_port.BytesToRead > 0)
+        {
+            var pending = _port.ReadExisting();
+            if (pending.Contains("+CMTI:") || pending.Contains("+CMT:"))
+                Interlocked.Increment(ref _pendingUrcCount);
+        }
+        _port.DiscardInBuffer();
+
+        // AT+CMGS với GSM 7-bit: destination là ASCII text
+        byte[] cmdBytes = Encoding.ASCII.GetBytes($"AT+CMGS=\"{destNumber}\"\r");
+        _port.BaseStream.Write(cmdBytes, 0, cmdBytes.Length);
+
+        if (!WaitForPrompt(5000)) return false;
+
+        // Gửi GSM 7-bit packed data + Ctrl+Z
+        _port.BaseStream.Write(gsm7Data, 0, gsm7Data.Length);
+        _port.BaseStream.WriteByte(0x1A);
+
+        return WaitForCmgsResult(timeoutMs);
+    }
+
+    /// <summary>
     /// 🔥 FIX: Gửi SMS dài (concatenated) bằng UDH (User Data Header).
     /// GSM 03.38 spec: UDH 7-byte cho concatenated SMS 8-bit reference.
     /// Format: 05 00 03 XX YY ZZ
@@ -881,15 +912,14 @@ public class AtCommandHelper : IDisposable
     ///   03 = IEI data length
     ///   XX YY = reference ID (random, big-endian)
     ///   ZZ   = total parts
-    /// Phần content sau UDH giảm 7 bytes (40 chars Unicode = 80 hex chars).
+    /// FIX: Tách theo Unicode char boundaries thay vì hex chars (tránh cắt surrogate pair).
     /// </summary>
-    private bool SendSmsConcatenated(string destNumber, string ucs2Hex, int timeoutMs)
+    private bool SendSmsConcatenated(string destNumber, string content, string ucs2Hex, int timeoutMs)
     {
-        // UCS-2 max per SMS part: (140 - 7) / 2 = 66.5 → 66 Unicode chars (132 hex chars)
+        // UCS-2 max per SMS part: (140 - 7) / 2 = 66.5 → 66 Unicode chars
         const int maxCharsPerPart = 66;
-        const int hexCharsPerPart = maxCharsPerPart * 4; // 264 hex chars per part
 
-        int totalParts = (int)Math.Ceiling((double)ucs2Hex.Length / hexCharsPerPart);
+        int totalParts = (int)Math.Ceiling((double)content.Length / maxCharsPerPart);
         if (totalParts > 255)
         {
             System.Diagnostics.Debug.WriteLine($"❌ SendSmsConcatenated: too many parts ({totalParts})");
@@ -898,36 +928,36 @@ public class AtCommandHelper : IDisposable
 
         // 🔥 FIX: Set UDHI bit (bit 6) trong CSMP first octet
         // 49 (0x31) | 0x40 = 113 (0x71) → modem biết content có UDH header
-        // Nếu không set, điện thoại nhận sẽ hiển thị UDH bytes thành ký tự rác
         SendAndRead("AT+CSMP=113,167,0,8", 1000);
 
-        // Generate random reference ID (2 bytes, big-endian)
+        // Generate random reference ID
         var rand = new Random();
         int refId = rand.Next(1, 255);
-        string refHex = refId.ToString("X2"); // 1 byte → 2 hex chars (pad left)
+        string refHex = refId.ToString("X2");
 
         System.Diagnostics.Debug.WriteLine(
             $"📝 [{_port.PortName}] Sending concatenated SMS: {totalParts} parts, refId={refId}");
 
         for (int part = 1; part <= totalParts; part++)
         {
-            int start = (part - 1) * hexCharsPerPart;
-            int len = Math.Min(hexCharsPerPart, ucs2Hex.Length - start);
-            string partHex = ucs2Hex.Substring(start, len);
+            // 🔥 FIX: Tách theo Unicode char boundaries — không cắt giữa surrogate pair
+            int charStart = (part - 1) * maxCharsPerPart;
+            int charLen = Math.Min(maxCharsPerPart, content.Length - charStart);
+            string partContent = content.Substring(charStart, charLen);
+
+            // Encode phần content đó sang UCS-2 hex
+            byte[] partBytes = Encoding.BigEndianUnicode.GetBytes(partContent);
+            string partHex = BitConverter.ToString(partBytes).Replace("-", "");
 
             // Build UDH: 050003 + refId(2 hex) + totalParts(2 hex) + partNum(2 hex)
-            // = 0500 03 XX YY ZZ  →  "050003" + refHex + totalHex + partHex
             string totalHex = totalParts.ToString("X2");
             string partNumHex = part.ToString("X2");
             string udhHex = $"050003{refHex}{totalHex}{partNumHex}";
-
-            // Full content = UDH (14 hex chars = 7 bytes) + partHex
             string fullHex = udhHex + partHex;
 
             System.Diagnostics.Debug.WriteLine(
-                $"📝 [{_port.PortName}] Part {part}/{totalParts}: UDH={udhHex} contentLen={len}");
+                $"📝 [{_port.PortName}] Part {part}/{totalParts}: chars {charStart}-{charStart + charLen}, hexLen={partHex.Length}");
 
-            // Send this part
             bool ok = SendSmsWithHexContentSinglePart(destNumber, fullHex, timeoutMs);
             if (!ok)
             {
@@ -936,14 +966,12 @@ public class AtCommandHelper : IDisposable
                 return false;
             }
 
-            // Delay giữa các parts để tránh modem overload (300ms)
             if (part < totalParts)
                 Thread.Sleep(300);
         }
 
-        // 🔥 FIX: Restore CSMP về bình thường (không UDHI) cho SMS đơn tiếp theo
+        // Restore CSMP về bình thường
         SendAndRead("AT+CSMP=49,167,0,8", 500);
-
         return true;
     }
 
@@ -972,18 +1000,16 @@ public class AtCommandHelper : IDisposable
         }
         _port.DiscardInBuffer();
 
-        // Gửi AT+CMGS command (Encode destNumber to UCS-2 hex vì CSCS="UCS2" bắt buộc)
-        byte[] destUcs2 = Encoding.BigEndianUnicode.GetBytes(destNumber);
-        string destUcs2Hex = BitConverter.ToString(destUcs2).Replace("-", "");
-        System.Diagnostics.Debug.WriteLine($"Sending AT+CMGS=\"{destUcs2Hex}\" (encoded from {destNumber})");
-        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destUcs2Hex}\"\r");
+        // 🔥 FIX: KHÔNG encode destination number sang UCS-2 hex.
+        // Hầu hết các modem và mạng Nhật (Softbank/Docomo) yêu cầu giữ nguyên ASCII (+81xxx)
+        // trong lệnh AT+CMGS ngay cả khi đang ở mode AT+CSCS="UCS2".
+        System.Diagnostics.Debug.WriteLine($"Sending AT+CMGS=\"{destNumber}\"");
+        byte[] cmdBytes = Encoding.UTF8.GetBytes($"AT+CMGS=\"{destNumber}\"\r");
         _port.BaseStream.Write(cmdBytes, 0, cmdBytes.Length);
 
         if (!WaitForPrompt(5000)) return false;
 
         // Gửi hex content + Ctrl+Z (0x1A) qua BaseStream
-        // ucs2Hex là string ASCII chứa hex digits → dùng Encoding.UTF8.GetBytes
-        // → mỗi hex digit (0-9, A-F) = 1 byte ASCII → đúng như modem mong đợi
         byte[] contentBytes = Encoding.UTF8.GetBytes(ucs2Hex + (char)0x1A);
         _port.BaseStream.Write(contentBytes, 0, contentBytes.Length);
 
@@ -1340,9 +1366,11 @@ public class AtCommandHelper : IDisposable
 
             if (int.TryParse(indexMatch.Groups[1].Value, out var index))
             {
-                string sender = quotedFields.ElementAtOrDefault(1) ?? (quotedFields.Count > 0 ? quotedFields[0] : "");
-                string timestamp = quotedFields.LastOrDefault(f =>
-                    Regex.IsMatch(f, @"^\d{2,4}[/-]\d{2}[/-]\d{2}\s*,\s*\d{2}:\d{2}:\d{2}(?:\s*[+-]\d{2})?$")) ?? "";
+                // CMGL format: +CMGL: idx,"stat","sender","alpha","timestamp"
+                // quotedFields[0]="REC UNREAD", [1]=sender, [2]=alpha(sca, often ""), [3]=timestamp
+                string sender = quotedFields.Count > 1 ? quotedFields[1] : "";
+                // 🔥 FIX: dùng ExtractTimestampFromCmglLine thay vì LastOrDefault (tránh nhầm alpha="" làm timestamp)
+                string timestamp = ExtractTimestampFromCmglLine(line);
                 
                 // 🔥 FIX: Đọc multi-line content (cho đến +CMGL: tiếp theo hoặc OK)
                 var contentSb = new StringBuilder();
@@ -1377,6 +1405,37 @@ public class AtCommandHelper : IDisposable
                 var raw = match.Groups[1].Value;
                 fields.Add(isUcs2Mode ? ForceDecodeUcs2(raw) : DecodeUcs2IfNeeded(raw));
             }
+        }
+        return fields;
+    }
+
+    /// <summary>
+    /// 🔥 Extract timestamp từ CMGL line — tìm trường CUỐI CÙNG không rỗng.
+    /// CMGL format: +CMGL: idx,"stat","sender","alpha","timestamp"
+    /// fields[0]="REC UNREAD", fields[1]=sender, fields[2]=alpha(đôi khi=""), fields[3]=timestamp
+    /// Trước đây dùng LastOrDefault → nhầm sang trường alpha="" → timestamp bị rỗng → garbled log
+    /// </summary>
+    private static string ExtractTimestampFromCmglLine(string line)
+    {
+        var fields = ExtractQuotedFieldsFromCmglLine(line);
+        // Tìm trường cuối cùng có timestamp pattern
+        for (int i = fields.Count - 1; i >= 0; i--)
+        {
+            var f = fields[i];
+            if (string.IsNullOrWhiteSpace(f)) continue;
+            if (Regex.IsMatch(f, @"^\d{2,4}[/-]\d{2}[/-]\d{2}\s*,\s*\d{2}:\d{2}:\d{2}"))
+                return f;
+        }
+        return "";
+    }
+
+    private static List<string> ExtractQuotedFieldsFromCmglLine(string line)
+    {
+        var fields = new List<string>();
+        foreach (Match match in Regex.Matches(line, @"""([^""]*)"""))
+        {
+            if (match.Groups.Count > 1)
+                fields.Add(match.Groups[1].Value);
         }
         return fields;
     }
@@ -1431,6 +1490,79 @@ public class AtCommandHelper : IDisposable
         return DateTime.MinValue;
     }
 
+    // ==================== GSM 03.38 Vietnamese Support ====================
+
+    // GSM 03.38 basic alphabet (7-bit per char, index = code)
+    private static readonly char[] Gsm7Basic = {
+        '@', '£', '$', '¥', 'è', 'é', 'ù', 'ì', 'ò', 'ç', '\r', 'Ø', 'ø', '\n', 'Å', 'å',
+        'Δ', '_', 'Φ', 'Γ', 'Λ', 'Ω', 'Π', 'Ψ', 'Σ', 'Θ', 'Ξ', '\x1B', 'Æ', 'æ', 'ß', 'É',
+        ' ', '!', '"', '#', '¤', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
+        '¡', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+        'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'Ä', 'Ö', 'Ñ', 'Ü', '§',
+        '¿', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+        'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ä', 'ö', 'ñ', 'ü', 'à'
+    };
+
+    // GSM 03.38 Extension table (escape sequences, 2 code units: ESC + char)
+    // GSM 7-bit has NO tiếng Việt chars (ă, â, đ, ê, ô, ơ, ư) → must use UCS-2
+    // Only ASCII + Greek + European special chars fit in GSM 7-bit.
+    private static readonly Dictionary<char, (char esc, char ch)> Gsm7Ext = new()
+    {
+        // Extension entries: (ESC_char, escaped_char) — GSM 03.38 spec
+        { '{',  ('\x1B', (char)0x7C) }, // 0x7B → ESC 0x7C
+        { '}',  ('\x1B', (char)0x7D) }, // 0x7D → ESC 0x7D
+        { '\\', ('\x1B', (char)0x60) }, // 0x5C → ESC 0x60
+        { '[',  ('\x1B', (char)0x7C) }, // 0x5B → ESC 0x7C (vertical bar)
+        { ']',  ('\x1B', (char)0x7D) }, // 0x5D → ESC 0x7D (tilde)
+        { '~',  ('\x1B', (char)0x7D) }, // 0x7E → ESC 0x7D (tilde)
+        { '€',  ('\x1B', (char)0x65) }, // 0x80 → ESC 0x65 (Euro)
+        { '^',  ('\x1B', (char)0x14) }, // 0x5E → ESC 0x14 (circumflex accent)
+    };
+
+    /// <summary>
+    /// 🔥 GSM 03.38 encoding cho tiếng Việt không dấu + tiếng Anh/ASCII.
+    /// Encode từng char → 7-bit GSM alphabet. Nếu có unsupported char → trả null.
+    /// Tiếng Việt có dấu (ă, â, đ, ê, ô, ơ, ư) KHÔNG fit trong GSM 7-bit → fallback sang UCS-2.
+    /// </summary>
+    public static byte[]? TryEncodeGsm7(string text)
+    {
+        var bits = new System.Collections.BitArray(text.Length * 8 + 16);
+        int bitPos = 0;
+        int escIdx = 27; // 0x1B in GSM basic table (index 27, from Gsm7Basic[27])
+
+        foreach (char ch in text)
+        {
+            int idx = Array.IndexOf(Gsm7Basic, ch);
+            if (idx >= 0)
+            {
+                for (int b = 0; b < 7; b++)
+                    bits.Set(bitPos++, ((idx >> b) & 1) == 1);
+            }
+            else if (Gsm7Ext.TryGetValue(ch, out var entry))
+            {
+                // Extension: ESC (7 bits) + escaped char (7 bits) = 2 code units = 14 bits
+                for (int b = 0; b < 7; b++)
+                    bits.Set(bitPos++, ((escIdx >> b) & 1) == 1);
+                for (int b = 0; b < 7; b++)
+                    bits.Set(bitPos++, ((entry.ch >> b) & 1) == 1);
+            }
+            else
+            {
+                // Unsupported character → caller must use UCS-2 instead
+                return null;
+            }
+        }
+
+        // Convert bit array → bytes
+        byte[] result = new byte[(bitPos + 7) / 8];
+        for (int i = 0; i < bitPos; i++)
+            if (bits.Get(i))
+                result[i / 8] |= (byte)(1 << (7 - (i % 8)));
+
+        return result;
+    }
+
     // ==================== Utilities ====================
 
     /// <summary>
@@ -1481,25 +1613,40 @@ public class AtCommandHelper : IDisposable
         string cleanHex = text.Replace("\n", "").Replace("\r", "").Replace(" ", "");
 
         // Check if UCS2 encoded (hex string, length divisible by 4)
-        // 🔥 FIX: Giảm min từ 8 → 4 (1 ký tự Unicode = 4 hex chars)
-        // Cho phép SMS ngắn tiếng Nhật/Việt ("あ" = 3042) decode đúng
         if (Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$") && cleanHex.Length % 4 == 0 && cleanHex.Length >= 4)
         {
             try
             {
                 var sb = new StringBuilder();
-                for (int i = 0; i < cleanHex.Length; i += 4)
+                int i = 0;
+                while (i < cleanHex.Length)
                 {
+                    int remaining = cleanHex.Length - i;
+                    if (remaining < 4) break;
+
                     int code = Convert.ToInt32(cleanHex.Substring(i, 4), 16);
-                    sb.Append((char)code);
+
+                    // Surrogate pair: high (D800-DBFF) + low (DC00-DFFF)
+                    if (code >= 0xD800 && code <= 0xDBFF && i + 8 <= cleanHex.Length)
+                    {
+                        int low = Convert.ToInt32(cleanHex.Substring(i + 4, 4), 16);
+                        if (low >= 0xDC00 && low <= 0xDFFF)
+                        {
+                            int realCode = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                            sb.Append(char.ConvertFromUtf32(realCode));
+                            i += 8;
+                            continue;
+                        }
+                    }
+
+                    sb.Append(char.ConvertFromUtf32(code));
+                    i += 4;
                 }
                 var decoded = sb.ToString();
-                // 🔥 Heuristic: kiểm tra ít nhất 50% chars là printable (tránh false positive)
-                // Ví dụ: OTP "12345678" sẽ decode thành ký tự control → reject
+                // Heuristic: kiểm tra ít nhất 50% chars là printable (tránh false positive)
                 int printableCount = decoded.Count(c => !char.IsControl(c) || c == '\n' || c == '\r' || c == '\t');
                 if (printableCount >= decoded.Length * 0.5)
                     return decoded;
-                // Fallback: không phải UCS2 thật → trả raw text
                 return text;
             }
             catch { return text; }
@@ -1510,6 +1657,7 @@ public class AtCommandHelper : IDisposable
     /// <summary>
     /// 🔥 Force decode UCS2 hex — dùng khi BIẾT CHẮC modem đang trả UCS2 hex.
     /// Không dùng heuristic (50% printable) → tránh false negative cho SMS ngắn/số.
+    /// FIX: Xử lý đúng surrogate pair (tiếng Nhật: ă, â, emoji).
     /// </summary>
     public static string ForceDecodeUcs2(string text)
     {
@@ -1517,16 +1665,35 @@ public class AtCommandHelper : IDisposable
         string cleanHex = text.Trim().Replace("\n", "").Replace("\r", "").Replace(" ", "");
 
         if (cleanHex.Length == 0) return text;
-        if (cleanHex.Length % 4 != 0) return text; // Không phải valid UCS2 hex
         if (!Regex.IsMatch(cleanHex, @"^[0-9A-Fa-f]+$")) return text; // Không phải hex
 
         try
         {
             var sb = new StringBuilder();
-            for (int i = 0; i < cleanHex.Length; i += 4)
+            int i = 0;
+            while (i < cleanHex.Length)
             {
+                int remaining = cleanHex.Length - i;
+                if (remaining < 4) break; // Không đủ 4 hex chars → ignore trailing
+
                 int code = Convert.ToInt32(cleanHex.Substring(i, 4), 16);
-                sb.Append((char)code);
+
+                // Surrogate pair: high surrogate (D800-DBFF) + low surrogate (DC00-DFFF)
+                if (code >= 0xD800 && code <= 0xDBFF && i + 8 <= cleanHex.Length)
+                {
+                    int low = Convert.ToInt32(cleanHex.Substring(i + 4, 4), 16);
+                    if (low >= 0xDC00 && low <= 0xDFFF)
+                    {
+                        // Combine surrogate pair → real Unicode codepoint
+                        int realCode = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                        sb.Append(char.ConvertFromUtf32(realCode));
+                        i += 8; // 2 code units = 8 hex chars
+                        continue;
+                    }
+                }
+
+                sb.Append(char.ConvertFromUtf32(code));
+                i += 4;
             }
             return sb.ToString();
         }

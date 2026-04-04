@@ -10,12 +10,14 @@ namespace GsmAgent.Services;
 /// </summary>
 public class ModemWorker : IDisposable
 {
-    // 🔥 FIX: Adaptive polling — poll nhanh để tránh miss SMS mới
-    // - Idle (queue rỗng): poll mỗi 1500ms (từ 3000ms — SMS có thể đến bất cứ lúc nào)
-    // - Active (queue có task): poll sau mỗi task → phát hiện SMS mới nhanh
-    // - After SMS received: poll lại sau 500ms (SMS có thể đến liên tục)
-    private const int SmsScanIntervalIdleMs = 1500;
-    private const int SmsScanIntervalActiveMs = 500;
+    // 🔥 FIX v3: Ultra-fast SMS detection — URC-driven + tight polling
+    // - URC detected: scan NGAY LẬP TỨC (0ms delay)
+    // - Idle (queue rỗng): poll mỗi 800ms (giảm từ 1500ms)
+    // - Active (queue có task): poll mỗi 300ms
+    // - TryTake timeout: 100ms (giảm từ 500ms) → loop iterates 5x faster
+    private const int SmsScanIntervalIdleMs = 800;
+    private const int SmsScanIntervalActiveMs = 300;
+    private const int QueuePollTimeoutMs = 100; // 🔥 Giảm từ 500ms → 100ms
     private readonly AtCommandHelper _helper;
     private readonly BlockingCollection<SmsTask> _queue = new(500); // 🔥 500 capacity for burst traffic
     private readonly CancellationTokenSource _cts = new();
@@ -88,7 +90,6 @@ public class ModemWorker : IDisposable
 
         // Đảm bảo SMSC đã được cấu hình — nếu thiếu, SMS sẽ gửi đi nhưng không đến
         _helper.EnsureSmscConfigured();
-        _lastSmsCount = _helper.GetSmsCount();
 
         IsRunning = true;
         _sim.Status = SimStatus.Online;
@@ -121,45 +122,52 @@ public class ModemWorker : IDisposable
         {
             try
             {
-                // 1. Poll SMS count — interval thích ứng với trạng thái worker
-                var elapsed = (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds;
-                int interval = _queue.Count > 0 ? SmsScanIntervalActiveMs : SmsScanIntervalIdleMs;
-
-                // Nếu thời gian chờ đã đủ, chúng ta trực tiếp đọc ListUnreadSms mà không cần phụ thuộc vào URC
-                if (elapsed >= interval)
+                // ═══════════════════════════════════════════════════════
+                // STEP 1: CHECK URC NGAY LẬP TỨC (near-zero cost)
+                // URC (+CMTI/+CMT) = modem báo có SMS mới → scan NGAY
+                // ═══════════════════════════════════════════════════════
+                bool urcDetected = _helper.CheckForNewSms();
+                if (urcDetected)
                 {
-                    _lastSmsCountCheck = DateTime.Now;
-                    
-                    var currentCount = _helper.GetSmsCount();
+                    System.Diagnostics.Debug.WriteLine(
+                        $"📬 [{_sim.ComPort}] URC detected — đọc SMS NGAY!");
+                    ReadIncomingSms();
+                    _lastSmsCountCheck = DateTime.Now; // Reset timer sau scan
+                }
 
-                    // 🔥 BẮT BUỘC ĐỌC: Nếu có tin nhắn (count > 0) -> đọc luôn!
-                    if (currentCount > 0)
+                // ═══════════════════════════════════════════════════════
+                // STEP 2: PERIODIC SCAN (safety net khi miss URC)
+                // Không dùng GetSmsCount() vì nó quá chậm (1-3 giây)
+                // Thay vào đó, trực tiếp ListUnreadSms theo interval
+                // ═══════════════════════════════════════════════════════
+                if (!urcDetected)
+                {
+                    var elapsed = (DateTime.Now - _lastSmsCountCheck).TotalMilliseconds;
+                    int interval = _queue.Count > 0 ? SmsScanIntervalActiveMs : SmsScanIntervalIdleMs;
+
+                    if (elapsed >= interval)
                     {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"📬 [{_sim.ComPort}] SMS count > 0 ({currentCount}). Force reading SMS!");
+                        _lastSmsCountCheck = DateTime.Now;
                         ReadIncomingSms();
-                        _lastSmsCount = _helper.GetSmsCount(); // Cập nhật lại số lượng sau khi xóa
                     }
                 }
 
-                // 2. Process send queue — non-blocking
-                if (_queue.TryTake(out var task, 500, _cts.Token))
+                // ═══════════════════════════════════════════════════════
+                // STEP 3: PROCESS SEND QUEUE — ultra-short timeout
+                // TryTake chỉ block 100ms (thay vì 500ms)
+                // → loop lặp 5x nhanh hơn → URC check 5x thường xuyên hơn
+                // ═══════════════════════════════════════════════════════
+                if (_queue.TryTake(out var task, QueuePollTimeoutMs, _cts.Token))
                 {
                     ProcessSmsTask(task);
 
-                    // 🔥 Check URC + SMS count ngay sau gửi xong
-                    // SMS nội bộ có thể đến ngay lập tức khi SIM khác vừa gửi xong
+                    // 🔥 Check URC ngay sau gửi xong — SMS reply có thể đến ngay lập tức
                     if (_helper.CheckForNewSms())
                     {
                         System.Diagnostics.Debug.WriteLine(
                             $"📬 [{_sim.ComPort}] URC after send — đọc SMS ngay!");
                         ReadIncomingSms();
-                    }
-                    else
-                    {
-                        _lastSmsCount = _helper.GetSmsCount();
-                        if (_lastSmsCount > 0)
-                            ReadIncomingSms();
+                        _lastSmsCountCheck = DateTime.Now;
                     }
                 }
             }
@@ -343,8 +351,12 @@ public class ModemWorker : IDisposable
 
             var allMessages = new List<(string storage, int index, string sender, string content, DateTime time)>();
 
-            // 🔥 Scan cả ME + SM storage — mỗi storage cần PrepareForRead riêng
-            foreach (var storage in new[] { "ME", "SM" })
+            // 🔥 FIX: Tối ưu scan SMS — chỉ scan ME trước. Nếu ME rỗng thì không cần scan SM (trừ khi là chu kỳ dọn dẹp)
+            // Hầu hết SMS mới đều vào ME. Scan luôn SM sẽ tốn gấp đôi thời gian (thêm ~5 giây vô ích).
+            var storagesToScan = new List<string> { "ME" };
+            if (_scanCount % 20 == 0) storagesToScan.Add("SM"); // Định kỳ kiểm tra cả SM
+
+            foreach (var storage in storagesToScan)
             {
                 try
                 {
@@ -355,7 +367,6 @@ public class ModemWorker : IDisposable
                         continue;
                     }
 
-                    // 🔥 FIX: Gọi PrepareForRead TRƯỚC mỗi storage — modem có thể reset mode khi switch storage
                     _helper.PrepareForRead();
                     var smsInStore = _helper.ListUnreadSms(5000);
 
