@@ -102,7 +102,6 @@ public class ServerConnection : IDisposable
                     string? json = null;
                     try 
                     { 
-                        // If server emits an object, this will extract the JSON string
                         json = response.GetValue<System.Text.Json.JsonElement>(0).GetRawText(); 
                     } 
                     catch 
@@ -116,21 +115,19 @@ public class ServerConnection : IDisposable
                         return;
                     }
 
-                    var data = JsonConvert.DeserializeObject<dynamic>(json);
-                    if (data == null)
-                    {
-                        LogMessage?.Invoke("⚠️ sms:send: dữ liệu rỗng sau parse");
-                        return;
-                    }
+                    LogMessage?.Invoke($"📦 Raw Backend Payload: {json}");
+                    
+                    // Parse safely avoiding dynamic issues
+                    var data = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
 
                     var task = new SmsTask
                     {
-                        MessageId = data.messageId?.ToString() ?? "",
-                        SourceAddr = data.sourceAddr?.ToString() ?? "",
-                        DestAddr = data.destAddr?.ToString() ?? "",
-                        Content = data.shortMessage?.ToString() ?? "",
-                        AccountId = (int)(data.accountId ?? 0),
-                        SystemId = data.systemId?.ToString() ?? "",
+                        MessageId = data.TryGetProperty("messageId", out var mid) ? mid.GetString() ?? "" : "",
+                        SourceAddr = data.TryGetProperty("sourceAddr", out var sa) ? sa.GetString() ?? "" : "",
+                        DestAddr = data.TryGetProperty("destAddr", out var da) ? da.GetString() ?? "" : "",
+                        Content = data.TryGetProperty("shortMessage", out var c) ? c.GetString() ?? "" : "",
+                        AccountId = data.TryGetProperty("accountId", out var aid) && aid.TryGetInt32(out var accId) ? accId : 0,
+                        SystemId = data.TryGetProperty("systemId", out var sid) ? sid.GetString() ?? "" : "",
                     };
 
                     LogMessage?.Invoke($"📨 Nhận SMS dispatch: {task.DestAddr} (from {task.SystemId}) [MsgID: {task.MessageId}]");
