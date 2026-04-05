@@ -167,16 +167,26 @@ public partial class MainViewModel : ObservableObject
             });
         };
 
-        // 📨 Incoming SMS notification
-        _portManager.IncomingSms += (sender, content, time) =>
+        // 📨 Incoming SMS notification + forward lên server để lưu lịch sử
+        _portManager.IncomingSms += (sender, content, comPort, receiver, time) =>
         {
+            // 📤 Forward incoming SMS lên server để lưu vào MongoDB
+            _serverConnection?.SendIncomingSms(
+                sender: sender,
+                receiver: receiver,
+                content: content,
+                comPort: comPort,
+                receivedAt: time
+            );
+
             Application.Current.Dispatcher.Invoke(() =>
             {
                 MessageList.Insert(0, new SmsMessage
                 {
                     MessageId = $"IN-{DateTime.Now.Ticks}",
                     SourceAddr = sender,
-                    DestAddr = "SIM",
+                    DestAddr = receiver,
+                    ComPort = comPort,
                     Content = content,
                     Direction = "IN",
                     Status = "RECEIVED",
@@ -190,6 +200,7 @@ public partial class MainViewModel : ObservableObject
                 Logger.Info($"📨 Incoming SMS from {sender}: {content}");
 
                 ShowNotification("📨 Tin nhắn mới", $"Từ: {sender}\n{content}");
+                UpdateStats();
             });
         };
         // 📞 Discovery progress — hiện trên giao diện
@@ -488,7 +499,7 @@ public partial class MainViewModel : ObservableObject
             _serverConnection?.SendSmsResult(messageId, status, null, null, error);
             Logger.Info($"📋 SMS {messageId} → {status}");
 
-            // Update message status in UI
+            // Update message status in UI + notification
             Application.Current.Dispatcher.Invoke(() =>
             {
                 var msg = MessageList.FirstOrDefault(m => m.MessageId == messageId);
@@ -499,6 +510,18 @@ public partial class MainViewModel : ObservableObject
                     msg.ErrorMessage = error;
                     MessageList[idx] = msg;
                 }
+
+                // 🔔 Notification cho kết quả gửi SMS
+                if (success)
+                {
+                    ShowNotification("✅ SMS đã gửi", $"Đến: {msg?.DestAddr ?? "??"}\nID: {messageId}");
+                }
+                else
+                {
+                    ShowNotification("❌ SMS gửi thất bại", $"ID: {messageId}\n{error ?? "Lỗi không xác định"}");
+                }
+
+                UpdateStats();
             });
         };
 
@@ -531,6 +554,7 @@ public partial class MainViewModel : ObservableObject
                     SourceAddr = task.SourceAddr,
                     Content = task.Content,
                     SystemId = task.SystemId,
+                    Direction = "OUT",
                     Status = "PENDING",
                     CreatedAt = DateTime.Now,
                 });
@@ -540,6 +564,9 @@ public partial class MainViewModel : ObservableObject
 
                 UpdateStats();
                 Logger.Info($"SMS dispatch received: {task.MessageId} → {task.DestAddr}");
+
+                // 🔔 Notification khi nhận dispatch từ server
+                ShowNotification("📤 SMS từ SMPP", $"Đến: {task.DestAddr}\nTừ: {task.SystemId}\n{task.Content[..Math.Min(40, task.Content.Length)]}...");
             });
         };
 

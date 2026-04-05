@@ -92,11 +92,23 @@ public class ServerConnection : IDisposable
             {
                 try
                 {
-                    var json = response.GetValue<string>(0);
-                    if (string.IsNullOrEmpty(json)) return;
+                    // SocketIOClient 3.x: server emit(obj) → GetValue<string> trả về JSON string
+                    string? json = null;
+                    try { json = response.GetValue<string>(0); } catch { }
+                    
+                    // Fallback: nếu server emit(JSON.stringify(obj)), GetValue trả về double-encoded
+                    if (string.IsNullOrEmpty(json))
+                    {
+                        LogMessage?.Invoke("⚠️ sms:send: không đọc được dữ liệu từ server");
+                        return;
+                    }
 
                     var data = JsonConvert.DeserializeObject<dynamic>(json);
-                    if (data == null) return;
+                    if (data == null)
+                    {
+                        LogMessage?.Invoke("⚠️ sms:send: dữ liệu rỗng sau parse");
+                        return;
+                    }
 
                     var task = new SmsTask
                     {
@@ -108,7 +120,7 @@ public class ServerConnection : IDisposable
                         SystemId = data.systemId?.ToString() ?? "",
                     };
 
-                    LogMessage?.Invoke($"📨 Nhận SMS dispatch: {task.DestAddr} (from {task.SystemId})");
+                    LogMessage?.Invoke($"📨 Nhận SMS dispatch: {task.DestAddr} (from {task.SystemId}) [MsgID: {task.MessageId}]");
                     SmsReceived?.Invoke(task);
 
                     // Dispatch to modem
@@ -116,6 +128,7 @@ public class ServerConnection : IDisposable
                     if (!dispatched)
                     {
                         // No modem available — report failure immediately
+                        LogMessage?.Invoke($"❌ Không có modem khả dụng cho SMS {task.MessageId}");
                         SendSmsResult(task.MessageId, "FAILED", null, null, "No available modem");
                     }
                 }
@@ -147,6 +160,31 @@ public class ServerConnection : IDisposable
             deviceName = deviceName ?? _settings.AgentId,
             errorMessage = error,
         });
+    }
+
+    /// <summary>
+    /// 📨 Gửi incoming SMS lên server để lưu lịch sử + broadcast tới dashboard.
+    /// Server sẽ lưu vào MongoDB collection incoming_sms.
+    /// </summary>
+    public void SendIncomingSms(string sender, string receiver, string content, string? comPort, DateTime? receivedAt)
+    {
+        if (_socket == null || !IsConnected)
+        {
+            LogMessage?.Invoke($"⚠️ Không thể gửi incoming SMS lên server (chưa kết nối)");
+            return;
+        }
+
+        _socket.EmitAsync("sms:incoming", new
+        {
+            sender,
+            receiver,
+            content,
+            comPort,
+            deviceName = _settings.AgentId,
+            receivedAt = (receivedAt ?? DateTime.Now).ToString("O"),
+        });
+
+        LogMessage?.Invoke($"📨 Đã gửi incoming SMS lên server: {sender} → {receiver}");
     }
 
     public void ReportSims()

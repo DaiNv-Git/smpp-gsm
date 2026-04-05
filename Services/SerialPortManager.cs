@@ -25,7 +25,7 @@ public class SerialPortManager : IDisposable
     public event Action<SimCard>? SimUpdated;
     public event Action<SimCard>? SimScanned; // 🆕 Fired immediately when each SIM is scanned (realtime)
     public event Action<List<SimCard>>? ScanCompleted;
-    public event Action<string, string, DateTime>? IncomingSms; // sender, content, time
+    public event Action<string, string, string, string, DateTime>? IncomingSms; // sender, content, comPort, receiver, time
     public event Action<string, string, bool, string?>? SmsResult; // messageId, status, success, error
     public event Action<string, string, bool>? DiscoveryLog; // comPort, message, isSuccess
 
@@ -594,7 +594,7 @@ public class SerialPortManager : IDisposable
                     return true; // Không forward nội bộ lên API
                 }
 
-                IncomingSms?.Invoke(sender, content, time);
+                IncomingSms?.Invoke(sender, content, comPort, sim.PhoneNumber ?? comPort, time);
 
                 // Persist local queue first, API forward still happens asynchronously.
                 var receiver = sim.PhoneNumber ?? comPort;
