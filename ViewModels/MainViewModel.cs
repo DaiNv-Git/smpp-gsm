@@ -233,17 +233,25 @@ public partial class MainViewModel : ObservableObject
 
     private async Task AutoStartAsync()
     {
-        await Task.Delay(1000); // Wait for UI to load
-        Logger.Info("Auto-scan starting...");
-        await ScanAsync();
-
-        if (_settings.AutoConnect)
+        try
         {
-            StartWorkers();
-        }
+            await Task.Delay(1000); // Wait for UI to load
+            Logger.Info("Auto-scan starting...");
+            await ScanAsync(); 
 
-        // 🔗 Khởi động MongoDB sync (mỗi 5 phút)
-        InitMongoSync();
+            if (_settings.AutoConnect)
+            {
+                // Call StartWorkers on the UI thread to safely access SimList
+                Application.Current.Dispatcher.Invoke(() => StartWorkers());
+            }
+
+            // 🔗 Khởi động MongoDB sync (mỗi 5 phút)
+            InitMongoSync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"❌ AutoStartAsync CRASHED: {ex.Message}\n{ex.StackTrace}");
+        }
     }
 
     /// <summary>

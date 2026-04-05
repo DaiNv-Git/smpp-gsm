@@ -51,6 +51,7 @@ public class ServerConnection : IDisposable
             _socket.OnConnected += (s, e) =>
             {
                 LogMessage?.Invoke("✅ Kết nối server thành công!");
+                Logger.Info("✅ SocketIO Kết nối server thành công!");
                 ConnectionChanged?.Invoke(true);
 
                 // Report available SIMs
@@ -146,6 +147,7 @@ public class ServerConnection : IDisposable
                 }
                 catch (Exception ex)
                 {
+                    Logger.Error($"❌ sms:send CATCH BÌNH THƯỜNG error: {ex.Message} \nStack: {ex.StackTrace}");
                     LogMessage?.Invoke($"❌ Parse sms:send error: {ex.Message}");
                 }
             });
@@ -157,6 +159,7 @@ public class ServerConnection : IDisposable
         }
         catch (Exception ex)
         {
+            Logger.Error($"❌ Connection failed: {ex.Message} \nStack: {ex.StackTrace}");
             LogMessage?.Invoke($"❌ Connection failed: {ex.Message}");
             ConnectionChanged?.Invoke(false);
         }
