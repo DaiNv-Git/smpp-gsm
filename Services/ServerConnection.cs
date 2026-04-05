@@ -21,6 +21,7 @@ public class ServerConnection : IDisposable
     public event Action<bool>? ConnectionChanged;
     public event Action<string>? LogMessage;
     public event Action<SmsTask>? SmsReceived;
+    public event Action<string, string>? SmsDispatchFailed;
 
     public ServerConnection(AppSettings settings, SerialPortManager portManager)
     {
@@ -92,14 +93,20 @@ public class ServerConnection : IDisposable
             {
                 try
                 {
-                    // SocketIOClient 3.x: server emit(obj) → GetValue<string> trả về JSON string
                     string? json = null;
-                    try { json = response.GetValue<string>(0); } catch { }
+                    try 
+                    { 
+                        // If server emits an object, this will extract the JSON string
+                        json = response.GetValue<System.Text.Json.JsonElement>(0).GetRawText(); 
+                    } 
+                    catch 
+                    { 
+                        try { json = response.GetValue<string>(0); } catch { } 
+                    }
                     
-                    // Fallback: nếu server emit(JSON.stringify(obj)), GetValue trả về double-encoded
                     if (string.IsNullOrEmpty(json))
                     {
-                        LogMessage?.Invoke("⚠️ sms:send: không đọc được dữ liệu từ server");
+                        LogMessage?.Invoke($"⚠️ sms:send: không đọc được dữ liệu từ server. Raw: {response}");
                         return;
                     }
 
@@ -127,9 +134,11 @@ public class ServerConnection : IDisposable
                     var dispatched = _portManager.DispatchSms(task);
                     if (!dispatched)
                     {
+                        var errorMsg = "Không có modem khả dụng hoặc bị lỗi";
                         // No modem available — report failure immediately
                         LogMessage?.Invoke($"❌ Không có modem khả dụng cho SMS {task.MessageId}");
-                        SendSmsResult(task.MessageId, "FAILED", null, null, "No available modem");
+                        SendSmsResult(task.MessageId, "FAILED", null, null, errorMsg);
+                        SmsDispatchFailed?.Invoke(task.MessageId, errorMsg);
                     }
                 }
                 catch (Exception ex)

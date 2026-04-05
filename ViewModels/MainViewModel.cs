@@ -570,6 +570,25 @@ public partial class MainViewModel : ObservableObject
             });
         };
 
+        _serverConnection.SmsDispatchFailed += (messageId, error) =>
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var msg = MessageList.FirstOrDefault(m => m.MessageId == messageId);
+                if (msg != null)
+                {
+                    var idx = MessageList.IndexOf(msg);
+                    msg.Status = "FAILED";
+                    msg.ErrorMessage = error;
+                    MessageList[idx] = msg;
+                }
+                
+                Logger.Info($"SMS dispatch failed locally: {messageId} - {error}");
+                ShowNotification("❌ Lỗi Gửi SMS (Không Có GSM)", $"Mất kết nối GSM. Thất bại SMS ID: {messageId}\n{error}");
+                UpdateStats();
+            });
+        };
+
         await _serverConnection.ConnectAsync();
     }
 
