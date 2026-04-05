@@ -504,7 +504,7 @@ public partial class MainViewModel : ObservableObject
         // 🔗 Wire SMS result: ModemWorker → SerialPortManager.SmsResult → ServerConnection → BE → DLR
         _portManager.SmsResult += (messageId, status, success, error) =>
         {
-            _serverConnection?.SendSmsResult(messageId, status, null, null, error);
+            _ = _serverConnection?.SendSmsResult(messageId, status, null, null, error);
             Logger.Info($"📋 SMS {messageId} → {status}");
 
             // Update message status in UI + notification

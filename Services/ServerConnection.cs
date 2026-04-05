@@ -141,7 +141,7 @@ public class ServerConnection : IDisposable
                         var errorMsg = "Không có modem khả dụng hoặc bị lỗi";
                         // No modem available — report failure immediately
                         LogMessage?.Invoke($"❌ Không có modem khả dụng cho SMS {task.MessageId}");
-                        SendSmsResult(task.MessageId, "FAILED", null, null, errorMsg);
+                        _ = SendSmsResult(task.MessageId, "FAILED", null, null, errorMsg);
                         SmsDispatchFailed?.Invoke(task.MessageId, errorMsg);
                     }
                 }
@@ -165,16 +165,25 @@ public class ServerConnection : IDisposable
         }
     }
 
-    public void SendSmsResult(string messageId, string status, string? simPhone, string? deviceName, string? error)
+    public async Task SendSmsResult(string messageId, string status, string? simPhone, string? deviceName, string? error)
     {
-        _socket?.EmitAsync("sms:result", new
+        if (_socket == null) return;
+        try
         {
-            messageId,
-            status,
-            simPhoneNumber = simPhone,
-            deviceName = deviceName ?? _settings.AgentId,
-            errorMessage = error,
-        });
+            await _socket.EmitAsync("sms:result", new
+            {
+                messageId,
+                status,
+                simPhoneNumber = simPhone,
+                deviceName = deviceName ?? _settings.AgentId,
+                errorMessage = error,
+            });
+            Logger.Info($"=> Đã đẩy sms:result ({status}) của {messageId} lên server an toàn.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"❌ Lỗi EmitAsync sms:result cho {messageId}: {ex.Message}");
+        }
     }
 
     /// <summary>
