@@ -2,7 +2,7 @@ namespace GsmAgent.Models;
 
 public class AppSettings
 {
-    public string ServerUrl { get; set; } = "http://72.60.41.168:3000";
+    public string ServerUrl { get; set; } = "http://72.60.41.168:4000";
     public string AgentId { get; set; } = Environment.MachineName;
     public int SmsCooldownMs { get; set; } = 500; // 🔥 Reduced for high-throughput (AT cmd itself takes 3-8s)
     public int MaxRetries { get; set; } = 3;

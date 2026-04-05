@@ -59,8 +59,14 @@ public class ServerConnection : IDisposable
 
             _socket.OnDisconnected += (s, e) =>
             {
-                LogMessage?.Invoke("🔌 Mất kết nối server");
+                LogMessage?.Invoke("🔌 Mất kết nối server: " + e);
+                Logger.Error($"Socket disconnected. Reason: {e}");
                 ConnectionChanged?.Invoke(false);
+            };
+
+            _socket.OnError += (s, e) =>
+            {
+                Logger.Error($"Socket error: {e}");
             };
 
             _socket.OnReconnectAttempt += (s, e) =>
